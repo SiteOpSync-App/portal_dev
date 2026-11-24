@@ -1,0 +1,16 @@
+{
+  "name": "SiteOpSync",
+  "short_name": "SiteOpSync",
+  "description": "Site check-in, QA inspections and hours for i-Glaze contractors",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [
+    { "src": "siteopsync_app_logo.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "siteopsync_app_logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "siteopsync_app_logo_maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
