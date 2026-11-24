@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Site Attendance</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+    <link rel="stylesheet" href="admin.css?v=1.24.0">
+</head>
+<body data-title="Admin - {co}">
+    <header>
+        <img src="company%20logo1.png" alt="i-Glaze Limited" class="logo">
+        <div class="title"><h1>Admin Dashboard</h1><span id="who"></span></div>
+        <div class="hdr-actions">
+            <span id="updated"></span>
+            <button class="ghost" onclick="refreshData()">&#8635; Refresh</button>
+            <button class="ghost" onclick="logout()">Log out</button>
+        </div>
+    </header>
+
+    <nav>
+        <button data-tab="hours" class="active">Hours</button>
+        <button data-tab="diary">Diary</button>
+        <button data-tab="attention">Needs attention<span id="attn-badge"></span></button>
+        <button data-tab="invoices">Invoices</button>
+        <button data-tab="qareports">QA Reports</button>
+        <button data-tab="qchecklist">QA Checklist</button>
+        <button data-tab="Users">Users</button>
+        <button data-tab="Sites">Projects</button>
+        <button data-tab="installs">Installations</button>
+        <button data-tab="applications">Applications</button>
+        <button data-tab="qr">QR Codes</button>
+    </nav>
+
+    <main>
+        <section id="hours">
+            <div class="bar">
+                <label>From <input type="date" id="f-from"></label>
+                <label>To <input type="date" id="f-to"></label>
+                <label>Employee <input type="text" id="f-emp" placeholder="Filter by name"></label>
+                <label class="chk"><input type="checkbox" id="f-failed"> Show failed attempts</label>
+                <button onclick="loadHours()">Load</button>
+                <button class="ghost" onclick="exportCsv()">Export CSV</button>
+                <button class="ghost" onclick="openAddShift()">+ Add shift</button>
+            </div>
+            <div id="summary" class="chips"></div>
+            <div class="scroll"><table id="t-hours"></table></div>
+        </section>
+
+        <section id="diary" hidden>
+            <div class="bar">
+                <button class="ghost" onclick="diaryMonth(-1)" aria-label="Previous month">&larr;</button>
+                <strong id="dc-title" style="min-width:150px;text-align:center"></strong>
+                <button class="ghost" onclick="diaryMonth(1)" aria-label="Next month">&rarr;</button>
+                <button class="ghost" onclick="diaryMonth(0)">Today</button>
+                <label>Project <select id="dc-site"></select></label>
+                <label>Contractor <select id="dc-person"></select></label>
+                <label>Colour by <select id="dc-by"><option value="site">Job</option><option value="person">Contractor</option></select></label>
+                <label class="chk"><input type="checkbox" id="dc-drafts" checked> Show drafts</label>
+            </div>
+            <div id="dc-legend" class="chips"></div>
+            <div id="dc-cal" class="cal"></div>
+            <p class="note">Click a coloured entry to read the notes and see the before and after photos. Dashed entries are drafts that haven't been submitted yet.</p>
+        </section>
+
+        <section id="attention" hidden>
+            <p class="note" style="margin:0 0 12px">These shifts have no check-out, or were closed automatically at the nightly cut-off. They aren't counted in invoices until corrected. Click Edit, set the check-out time and Save. Saving without changes accepts the times as they are.</p>
+            <div class="scroll"><table id="t-attn"></table></div>
+        </section>
+
+        <section id="invoices" hidden>
+            <div class="bar">
+                <label>Submitted from <input type="date" id="inv-from"></label>
+                <label>To <input type="date" id="inv-to"></label>
+                <label>Search <input type="text" id="inv-search" placeholder="Contractor name"></label>
+                <button onclick="loadInv()">Load</button>
+            </div>
+            <div class="scroll"><table id="t-inv"></table></div>
+        </section>
+
+        <section id="qchecklist" hidden>
+            <div class="bar">
+                <label>Report <select id="qq-report"><option>Windows</option><option>Doors</option><option>Curtain Walling</option></select></label>
+                <button onclick="openQq(0)">+ Add question</button>
+            </div>
+            <p class="note" style="margin:0 0 12px">Pick a report to see and edit its questions. Changes only affect new reports. Reports already completed keep their questions exactly as they were. Set a question to Inactive to hide it from new reports without deleting it.</p>
+            <div class="scroll"><table id="t-qq"></table></div>
+        </section>
+
+        <section id="qareports" hidden>
+            <div class="bar">
+                <label>From <input type="date" id="qa-from"></label>
+                <label>To <input type="date" id="qa-to"></label>
+                <label>Search <input type="text" id="qa-search" placeholder="Inspector or site"></label>
+                <label class="chk"><input type="checkbox" id="qa-fails"> Show failed only</label>
+                <button onclick="loadQa()">Load</button>
+            </div>
+            <div class="scroll"><table id="t-qa"></table></div>
+        </section>
+
+        <section id="Users" hidden>
+            <div class="bar"><button onclick="openEdit('Users', 0)">+ Add user</button></div>
+            <div class="scroll"><table id="t-Users"></table></div>
+        </section>
+
+        <section id="Sites" hidden>
+            <div class="bar"><button onclick="openEdit('Sites', 0)">+ Add project</button></div>
+            <div id="t-Sites" class="cards"></div>
+        </section>
+
+        <section id="installs" hidden>
+            <div class="bar">
+                <label>Project <select id="inst-site"></select></label>
+                <button onclick="openInst(0, false)">+ Add installation</button>
+            </div>
+            <p class="note" style="margin:0 0 12px">Add each window, door or curtain wall type for the project, with its reference, phase, elevation / level and drawings. Inspectors choose from this list in the QA form, or pick Ad hoc if something isn't listed. Inactive installations are hidden from the QA form. Completed reports keep the details they were completed with.</p>
+            <div class="scroll"><table id="t-inst"></table></div>
+        </section>
+
+        <section id="applications" hidden>
+            <div class="bar">
+                <label>Project <select id="app-site"></select></label>
+                <button id="app-gen" onclick="genApp()">Generate application</button>
+            </div>
+            <div id="app-summary" class="chips"></div>
+            <p class="note" style="margin:0 0 12px">An application claims every stage that has been ticked and isn't already awaiting a response or agreed. When the main contractor replies, tick the lines they agreed and save their response. Lines they didn't agree are offered again on the next application. Prices are frozen when an application is generated.</p>
+            <div id="app-list"></div>
+            <div id="app-invoices"></div>
+        </section>
+
+        <section id="qr" hidden>
+            <div class="bar">
+                <label>Site <select id="q-site"></select></label>
+                <label class="chk"><input type="checkbox" id="q-label" checked> Show site name under code</label>
+                <button onclick="downloadQr()">Download PNG</button>
+            </div>
+            <canvas id="q-canvas"></canvas>
+            <p class="note">The code contains only the Site ID as plain text. Always test-scan a printed code before putting it up.</p>
+        </section>
+    </main>
+
+    <dialog id="dlg">
+        <h2 id="dt"></h2>
+        <div id="df"></div>
+        <p id="de" class="err"></p>
+        <div class="btns"><button id="ds">Save</button><button class="ghost" onclick="dlg.close()">Cancel</button></div>
+    </dialog>
+
+    <dialog id="pickdlg" class="mapdlg">
+        <h2>Pick site location</h2>
+        <div class="pick-bar">
+            <input type="text" id="p-q" placeholder="Search an address, postcode or place">
+            <button onclick="pickSearch()">Search</button>
+        </div>
+        <div id="pickmap"></div>
+        <div class="radius-row">
+            <label for="p-rad">Check-in radius</label>
+            <input type="range" id="p-rad" min="20" max="2000" step="10" value="125">
+            <input type="number" id="p-radnum" min="20" max="5000" step="10" value="125"> <span>metres</span>
+        </div>
+        <p id="p-info" class="note">Click the map or drag the pin to set the location. Use the slider or box below to set the check-in radius (the blue circle).</p>
+        <div class="btns"><button id="p-use">Use this location</button><button class="ghost" onclick="pickdlg.close()">Cancel</button></div>
+    </dialog>
+
+    <dialog id="projdlg" class="projdlg">
+        <h2 id="pj-title"></h2>
+        <div id="pj-body"></div>
+        <div class="btns"><button class="ghost" onclick="projdlg.close()">Close</button></div>
+    </dialog>
+
+    <dialog id="diarydlg" class="mapdlg photodlg">
+        <h2 id="dd-title"></h2>
+        <p id="dd-meta" class="note"></p>
+        <p id="dd-notes" style="white-space:pre-wrap;margin:12px 0"></p>
+        <h3 class="sect">Before photos</h3>
+        <div id="dd-before" class="ph-grid"></div>
+        <h3 class="sect">After photos</h3>
+        <div id="dd-after" class="ph-grid"></div>
+        <div class="btns"><button class="danger" id="dd-del">Delete entry</button><button class="ghost" onclick="diarydlg.close()">Close</button></div>
+    </dialog>
+
+    <dialog id="viewdlg" class="mapdlg viewdlg">
+        <h2 id="vw-title"></h2>
+        <iframe id="vw-frame" title="Document preview"></iframe>
+        <div class="btns"><button onclick="printView()">Download PDF</button><button class="ghost" onclick="viewdlg.close()">Close</button></div>
+    </dialog>
+
+    <dialog id="photodlg" class="mapdlg photodlg">
+        <h2 id="ph-title"></h2>
+        <div class="ph-stage">
+            <button class="ghost ph-nav" onclick="phStep(-1)" aria-label="Previous photo">&#8249;</button>
+            <img id="ph-main" alt="QA photo">
+            <button class="ghost ph-nav" onclick="phStep(1)" aria-label="Next photo">&#8250;</button>
+        </div>
+        <p id="ph-count" class="note"></p>
+        <div id="ph-thumbs" class="ph-thumbs"></div>
+        <div class="btns"><button class="ghost" onclick="photodlg.close()">Close</button></div>
+    </dialog>
+
+    <dialog id="mapdlg" class="mapdlg">
+        <h2 id="mt"></h2>
+        <iframe id="mf" title="Location map" referrerpolicy="no-referrer-when-downgrade" allowfullscreen></iframe>
+        <p id="mm" class="note"></p>
+        <div class="btns">
+            <a id="ml" class="btn-link" target="_blank" rel="noopener">Open in Google Maps</a>
+            <button class="ghost" onclick="mapdlg.close()">Close</button>
+        </div>
+    </dialog>
+
+    <footer>&copy; <span id="yr"></span> <span data-company>i-Glaze Limited</span>. All rights reserved. Powered by SiteOpSync | Karl Harris<br><span id="version-line"></span></footer>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="config.js?v=1.24.0"></script>
+    <script src="branding.js?v=1.24.0"></script>
+    <script src="invoice.js?v=1.24.0"></script>
+    <script src="admin.js?v=1.24.0"></script>
+</body>
+</html>
