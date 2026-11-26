@@ -34,6 +34,54 @@ function showVersion(scriptV) {
     el.classList.toggle("mismatch", c !== 0);
 }
 
+// --- Matching thin-stroke SVG icons across cards, camera/photo controls, and bottom nav ---
+const UI_ICONS = {
+    attendance: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+    qa: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 5-3.2 8.2-7 9-3.8-.8-7-4-7-9V6l7-3z"/><path d="M9.5 12l1.8 1.8L15 10"/></svg>',
+    progress: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V2.5h6V4"/><path d="M9 12l2 2 4-4"/></svg>',
+    diary: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M8 7h8M8 11h6"/></svg>',
+    hours: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>',
+    details: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-3.3 3.6-5.5 8-5.5s8 2.2 8 5.5"/></svg>',
+    logout: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9"/><path d="M10 12h11"/><path d="M17 8l4 4-4 4"/></svg>',
+    camera: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>',
+    gallery: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>'
+};
+
+function iconSvg(name) {
+    return UI_ICONS[name] || "";
+}
+
+function hydrateStaticIcons() {
+    document.querySelectorAll("[data-icon]").forEach((el) => {
+        const svg = iconSvg(el.dataset.icon);
+        if (svg) el.innerHTML = svg;
+    });
+    document.querySelectorAll("[data-photo-drop]").forEach((el) => {
+        const ic = el.querySelector(".photo-drop-icon");
+        if (ic && !ic.innerHTML.trim()) ic.innerHTML = iconSvg("camera");
+    });
+}
+
+function initialsOf(name) {
+    const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return "U";
+    return ((parts[0][0] || "") + (parts.length > 1 ? parts[parts.length - 1][0] || "" : "")).toUpperCase();
+}
+
+function updateUserPill(name, role) {
+    const pill = document.getElementById("user-pill");
+    if (!pill) return;
+    if (!loggedIn || !name) {
+        pill.classList.add("hidden");
+        pill.innerHTML = "";
+        return;
+    }
+    const escN = escHtml(name);
+    const escR = escHtml(role || "Field");
+    pill.innerHTML = `<span class="user-avatar" aria-hidden="true">${escHtml(initialsOf(name))}</span><span class="user-meta"><b>${escN}</b><small>${escR}</small></span>`;
+    pill.classList.remove("hidden");
+}
+
 let userName = "";
 let userSites = [];
 let wasCheckedIn = false;
@@ -75,6 +123,8 @@ function startIdleTimer(ms) {
 
 function logout() {
     clearTimeout(idleTimer);
+    loggedIn = false;
+    updateUserPill("", "");
     appReload(); // clears the PIN from memory and stops the camera
 }
 
@@ -150,6 +200,7 @@ async function submitPin() {
         userCanInvoice = result.canInvoice !== false;   // invoicing can be switched off per person
         updateHoursLabels();
         loggedIn = true;
+        updateUserPill(userName, userRole);
         buildNav();
         applyFeatures();
 
@@ -188,6 +239,8 @@ function showScreen(name, title, sub) {
     });
     document.getElementById("app-title").innerText = title;
     document.getElementById("app-subtitle").innerText = sub;
+    if (name === "pin") updateUserPill("", "");
+    else if (loggedIn) updateUserPill(userName, userRole);
     window.scrollTo(0, 0);
     currentScreen = name;
     syncHistory(name);
@@ -233,15 +286,15 @@ function appReload() {
 
 function buildNav() {
     const dual = userRole === "Contractor/QA", con = userRole === "Contractor" || dual, qa = userRole === "QA" || dual, items = [];
-    if (con && features.attendance) items.push(["scanner", "&#128338;", "Attendance", "openAttendance()"]);
-    if (qa && features.qa) items.push(["qa", "&#128203;", "QA", "openQa()"]);
-    if (features.progress) items.push(["progress", "&#9989;", "Progress", "openProgress()"]);
-    if (features.diary) items.push(["diary", "&#128214;", "Diary", "openDiary()"]);
-    if (con && features.hours) items.push(["hours", "&#129534;", "Hours", "openHours()"]);
-    if (con && features.hours && userCanInvoice) items.push(["details", "&#128100;", "Details", "openDetails()"]);
-    items.push(["out", "&#128682;", "Log out", "logout()"]);
+    if (con && features.attendance) items.push(["scanner", iconSvg("attendance"), "Attendance", "openAttendance()"]);
+    if (qa && features.qa) items.push(["qa", iconSvg("qa"), "QA", "openQa()"]);
+    if (features.progress) items.push(["progress", iconSvg("progress"), "Progress", "openProgress()"]);
+    if (features.diary) items.push(["diary", iconSvg("diary"), "Diary", "openDiary()"]);
+    if (con && features.hours) items.push(["hours", iconSvg("hours"), "Hours", "openHours()"]);
+    if (con && features.hours && userCanInvoice) items.push(["details", iconSvg("details"), "Details", "openDetails()"]);
+    items.push(["out", iconSvg("logout"), "Log out", "logout()"]);
     document.getElementById("bottom-nav").innerHTML = items.map((i) =>
-        `<button type="button" data-s="${i[0]}" onclick="${i[3]}"><span>${i[1]}</span>${i[2]}</button>`).join("");
+        `<button type="button" data-s="${i[0]}" onclick="${i[3]}"><span class="nav-ic" aria-hidden="true">${i[1]}</span><span class="nav-lbl">${i[2]}</span></button>`).join("");
 }
 
 function updateNav(name) {
@@ -258,7 +311,7 @@ function updateNav(name) {
 }
 
 function openMenu() {
-    showScreen("menu", "Logged in: " + userName, "Please select an option");
+    showScreen("menu", "Site Portal", "Please select an option");
     startIdleTimer();
 }
 
@@ -303,7 +356,6 @@ async function startCameraScanner() {
         { facingMode: "environment" },
         { fps: 10, qrbox: { width: 220, height: 220 } },
         (scannedSiteId) => {
-            // The camera can report the same code several times before it stops: only act once
             if (handlingScan) return;
             handlingScan = true;
             html5QrCode.stop().catch(() => {});
@@ -362,34 +414,28 @@ async function sendLog(siteId, lat, lng) {
         });
 
         if (result.status === "SUCCESS") {
-            // Success ends the session so the next person starts from the PIN screen
             setLocalCi(action === "Check-In", siteId);
             clearTimeout(idleTimer);
             showStatus(`✓ ${action} logged for ${result.name}`, "success");
             setTimeout(() => { appReload(); }, 3000);
         } else if (result.status === "ALREADY_CHECKED_IN") {
-            // Ask before doing anything; nothing has been logged yet
             pendingScan = { siteId: siteId, lat: lat, lng: lng };
             startIdleTimer();
             showStatus("You're already checked in here. Did you mean to check out?", "info");
             document.getElementById("confirm-box").classList.remove("hidden");
         } else if (result.status === "NO_CHECK_IN") {
-            // Ask before doing anything; nothing has been logged yet
             pendingScan = { siteId: siteId, lat: lat, lng: lng };
             startIdleTimer();
             showStatus("You're not checked in at this site. Did you mean to check in?", "info");
             document.getElementById("nocheckin-box").classList.remove("hidden");
         } else if (result.reason === "Invalid or Inactive PIN") {
-            // PIN was switched off mid-session: retrying can't help
             showStatus(`${action} failed: ${result.reason}.`, "error");
             setTimeout(() => { appReload(); }, 4000);
         } else {
-            // Stay logged in so they can try again
             showStatus(`${action} failed: ${result.reason || "unknown error"}.${result.logged ? " This attempt has been recorded." : ""}`, "error");
             showRetry();
         }
     } catch (err) {
-        // No signal: keep the scan on the phone (with the time and GPS position) and send it later
         enqueue({ queueId: queueId, pin: enteredPin, siteId: siteId, action: action, latitude: lat, longitude: lng, clientTime: scanTime });
         setLocalCi(action === "Check-In", siteId);
         clearTimeout(idleTimer);
@@ -500,18 +546,16 @@ async function submitManualCheckout() {
     }
 }
 
-// Typing a comment counts as activity, so the idle log-out doesn't interrupt it
 document.getElementById("manual-comment").addEventListener("input", startIdleTimer);
 
 // --- Quality Assurance inspection ---
-// The questions are kept by the admins (QA Checklist tab) and depend on the report type chosen.
 let QA_CHECKS = [];
 let qaType = "";
 let qaInstalls = [], qaInstallPrev = "", qaProjectPrev = "";
 let qaStages = [], qaHasSetup = true;
-const QA_IDLE_MS = 15 * 60 * 1000;   // longer idle limit while filling in a report
-const QA_MAX_PHOTOS = 6;          // extra photos at the end of the form
-const QA_MAX_PER_CHECK = 3;       // photos per question
+const QA_IDLE_MS = 15 * 60 * 1000;
+const QA_MAX_PHOTOS = 6;
+const QA_MAX_PER_CHECK = 3;
 let qaPhotos = [];
 let qaCheckPhotos = {};
 let qaResults = {};
@@ -544,7 +588,6 @@ async function openQa(mode) {
     qaMsg("");
     const proj = document.getElementById("qa-project");
     if (!loadQaDraft()) {
-        // If they're checked in, default the project to the site they're checked in at
         if (!proj.value && checkedInSiteId) proj.value = checkedInSiteId;
         qaProjectPrev = proj.value;
         loadQaInstalls(proj.value);
@@ -553,7 +596,6 @@ async function openQa(mode) {
     startIdleTimer(QA_IDLE_MS);
 }
 
-// Project details for the chosen project (set on the project card in the dashboard)
 function showQaProject() {
     const s = userSites.find((x) => x.id === document.getElementById("qa-project").value) || {};
     document.getElementById("qa-projno").value = s.projectNo || "";
@@ -571,7 +613,7 @@ async function loadQaQuestions(type, draft) {
     try {
         const r = await callBackend({ type: "qaQuestions", pin: enteredPin, reportType: type,
                                       installId: qaMode === "progress" ? document.getElementById("qa-install").value : "", viaProgress: qaMode === "progress" });
-        if (document.getElementById("qa-type").value !== type) return;   // they changed their mind while loading
+        if (document.getElementById("qa-type").value !== type) return;
         if (r.status !== "SUCCESS") { QA_CHECKS = []; box.innerHTML = `<p class="error-msg">${escHtml(r.reason || "Could not load the questions.")}</p>`; return; }
         QA_CHECKS = r.questions;
         try { localStorage.setItem(key, JSON.stringify(r.questions)); } catch (err) {}
@@ -601,7 +643,7 @@ function renderQaChecks() {
             </div>
             <textarea id="qn-${c.id}" rows="${text ? 3 : 2}" maxlength="${text ? 500 : 300}" placeholder="${text ? "Your answer" : "Notes/Defects"}"></textarea>
             <div class="qa-photo hidden" id="qp-${c.id}">
-                <label class="photo-drop small" id="qpl-${c.id}">&#128247; Add photo <small>(required)</small>
+                <label class="photo-drop small" id="qpl-${c.id}"><span class="photo-drop-icon" aria-hidden="true">${iconSvg("camera")}</span><span class="photo-drop-lbl">Add photo</span> <small>(required)</small>
                     <input type="file" accept="image/*" multiple hidden data-q="${c.id}">
                 </label>
                 <div class="thumbs" id="qt-${c.id}"></div>
@@ -637,7 +679,8 @@ function renderCheckThumbs(id) {
         `<div class="thumb"><img src="${p}" alt="Photo ${i + 1}"><button type="button" onclick="removeCheckPhoto('${id}', ${i})">&times;</button></div>`).join("");
     const label = document.getElementById("qpl-" + id);
     label.classList.toggle("hidden", list.length >= QA_MAX_PER_CHECK);
-    label.firstChild.textContent = list.length ? "\u{1F4F7} Add another photo " : "\u{1F4F7} Add photo ";
+    const lblText = label.querySelector(".photo-drop-lbl");
+    if (lblText) lblText.textContent = list.length ? "Add another photo" : "Add photo";
     label.querySelector("small").textContent = (!list.length && required) ? "(required)" : "(optional)";
 }
 
@@ -690,7 +733,6 @@ function applyQaDraft(d) {
     qaMsg("Draft restored. Add your photos again.", true);
 }
 
-// Returns true when a saved draft with a project was found (it then loads the installations itself)
 function loadQaDraft() {
     try {
         const d = JSON.parse(localStorage.getItem(qaDraftKey()) || "null");
@@ -702,7 +744,6 @@ function loadQaDraft() {
     } catch (err) { return false; }
 }
 
-// Installations the office has set up for the chosen project (cached on the phone for poor signal)
 async function loadQaInstalls(siteId, draft) {
     qaInstalls = []; qaStages = []; qaHasSetup = true;
     let offlineErr = "";
@@ -710,7 +751,7 @@ async function loadQaInstalls(siteId, draft) {
         const progress = qaMode === "progress", key = "qaInstalls:" + siteId;
         try {
             const r = await callBackend({ type: progress ? "progressList" : "qaInstalls", pin: enteredPin, siteId: siteId });
-            if (document.getElementById("qa-project").value !== siteId) return;   // they changed project while loading
+            if (document.getElementById("qa-project").value !== siteId) return;
             if (r.status === "SUCCESS") {
                 qaInstalls = r.installs;
                 if (progress) { qaStages = r.stages || []; qaHasSetup = r.hasSetup !== false; }
@@ -741,7 +782,6 @@ function fillQaInstalls(keep) {
     sel.value = keep || "";
 }
 
-// A listed installation fills the details and the report type; Ad hoc lets the inspector type them in
 function applyQaInstall(id, d) {
     const adhoc = id === "__adhoc", inst = qaInstalls.find((i) => i.id === id);
     const fields = { ref: "qa-ref", phase: "qa-phase", level: "qa-level", drawings: "qa-drawings" };
@@ -764,7 +804,6 @@ function applyQaInstall(id, d) {
     loadQaQuestions(qaType, d);
 }
 
-// ---- Progress page: tick the payment stages; the QA form below unlocks when every stage is ticked ----
 const canQa = () => userRole === "QA" || userRole === "Contractor/QA";
 const qaInstObj = () => qaInstalls.find((i) => i.id === document.getElementById("qa-install").value);
 const qaStagesComplete = (inst) => !!inst && qaStages.length > 0 && qaStages.every((s) => (inst.done || []).indexOf(s.id) >= 0);
@@ -835,7 +874,6 @@ document.getElementById("qa-install").addEventListener("change", (e) => {
     applyQaInstall(next);
 });
 
-// Report type can only be changed for an ad hoc installation
 document.getElementById("qa-type").addEventListener("change", (e) => {
     const next = e.target.value;
     if (next !== qaType && hasQaWork() && !confirm("Changing the report type clears your answers and photos for the questions. Continue?")) { e.target.value = qaType; return; }
@@ -897,7 +935,6 @@ document.getElementById("qa-checks").addEventListener("click", (e) => {
     if (b) setQaResult(b.parentElement.dataset.id, b.dataset.r);
 });
 
-// photos for a single question
 document.getElementById("qa-checks").addEventListener("change", async (e) => {
     const inp = e.target.closest("input[data-q]");
     if (!inp) return;
@@ -914,7 +951,6 @@ document.getElementById("qa-file").addEventListener("change", async (e) => {
     renderThumbs();
 });
 
-// Typing or tapping in the report counts as activity
 ["input", "click"].forEach((ev) =>
     document.getElementById("qa-screen").addEventListener(ev, () => startIdleTimer(QA_IDLE_MS)));
 
@@ -929,7 +965,7 @@ const dmyShort = (s) => s.slice(8, 10) + "/" + s.slice(5, 7);
 const hmText = (m) => `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
 const gbp = (n) => "\u00A3" + Number(n).toFixed(2);
 
-function weekRange() {   // Monday to Sunday
+function weekRange() {
     const d = new Date();
     d.setHours(12, 0, 0, 0);
     d.setDate(d.getDate() - ((d.getDay() + 6) % 7) + weekOffset * 7);
@@ -952,7 +988,6 @@ function dayMinutes() {
 
 function openHours() {
     weekOffset = 0;
-    // invoice buttons stay hidden unless this person has invoicing on (known from login), so they never flash up
     document.getElementById("btn-prepare").classList.toggle("hidden", !userCanInvoice);
     document.getElementById("btn-myinv").classList.toggle("hidden", !userCanInvoice);
     document.getElementById("btn-details").classList.toggle("hidden", !userCanInvoice);
@@ -964,7 +999,7 @@ function openHours() {
 function hoursBack() { goHome(); }
 
 function shiftWeek(n) {
-    weekOffset = Math.min(0, weekOffset + n);   // no future weeks
+    weekOffset = Math.min(0, weekOffset + n);
     loadHours();
 }
 
@@ -977,7 +1012,7 @@ async function loadHours() {
         if (r.status !== "SUCCESS") { msg.innerText = r.reason || "Could not load your hours."; return; }
         msg.innerText = "";
         hoursData = { from: from, to: to, shifts: r.shifts, incomplete: r.incomplete, invoice: r.invoice, details: r.details || {}, canInvoice: r.canInvoice !== false };
-        const invOn = r.canInvoice !== false;   // invoicing can be switched off per person
+        const invOn = r.canInvoice !== false;
         document.getElementById("btn-prepare").classList.toggle("hidden", !invOn);
         document.getElementById("btn-myinv").classList.toggle("hidden", !invOn);
         document.getElementById("btn-details").classList.toggle("hidden", !invOn);
@@ -1131,7 +1166,6 @@ function queueNote(msg, ok) {
     noteTimer = setTimeout(() => el.classList.add("hidden"), 20000);
 }
 
-// What this phone last knew about whether you're checked in (used only when there is no signal)
 function setLocalCi(on, siteId) {
     if (!pinHash) return;
     try {
@@ -1151,16 +1185,17 @@ async function offlineLogin() {
     try {
         const h = await sha256(enteredPin);
         const k = JSON.parse(localStorage.getItem("known:" + h) || "null");
-        if (!k || k.role === "QA" || k.role === "Admin") return false;   // attendance only
+        if (!k || k.role === "QA" || k.role === "Admin") return false;
         pinHash = h;
         userName = k.name;
         userSites = k.sites || [];
         userRole = k.role || "Contractor";
         userCanInvoice = k.canInvoice !== false;
         features = k.features || features;
-        if (!features.attendance) return false;   // offline mode is for check-in / check-out only
+        if (!features.attendance) return false;
         updateHoursLabels();
         loggedIn = true;
+        updateUserPill(userName, userRole);
         buildNav();
         applyFeatures();
         const ci = getLocalCi();
@@ -1184,7 +1219,7 @@ async function flushQueue() {
             let r;
             try {
                 r = await callBackend(Object.assign({ type: "log", queued: true }, item));
-            } catch (err) { break; }   // still no signal: try again later
+            } catch (err) { break; }
             setQueue(getQueue().filter((x) => x.queueId !== item.queueId));
             if (r.status === "SUCCESS") queueNote(`✓ Your saved ${item.action} from ${when} has been recorded.`, true);
             else if (r.status === "NO_CHECK_IN") queueNote(`Your saved ${item.action} from ${when} wasn't recorded: you weren't checked in at that site. Tell an admin if this is wrong.`, false);
@@ -1194,7 +1229,7 @@ async function flushQueue() {
     } finally { flushing = false; }
 }
 
-// --- My invoices (current and previous tax year) ---
+// --- My invoices ---
 let myInvoices = [];
 
 async function openMyInvoices() {
@@ -1231,14 +1266,13 @@ async function openMyInvoices() {
 
 function downloadMyInvoice(i) { printInvoice(myInvoices[i]); }
 
-// People with invoicing switched off only see "hours", never "invoice"
 function updateHoursLabels() {
     const sub = document.getElementById("hrs-sub");
     if (sub) sub.innerText = userCanInvoice ? "View Hours & Create Invoice" : "View Hours";
     document.querySelectorAll(".hours-btn").forEach((b) => { b.innerText = userCanInvoice ? "My hours & invoices" : "My hours"; });
 }
 
-// --- Install as an app (Android Chrome offers this; iPhone uses Share > Add to Home Screen) ---
+// --- Install as an app ---
 let installPrompt = null;
 const isInstalled = () => window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
 
@@ -1258,7 +1292,7 @@ document.getElementById("install-btn").addEventListener("click", async () => {
 
 window.addEventListener("appinstalled", () => document.getElementById("install-btn").classList.add("hidden"));
 
-// --- My details (invoice details the contractor can edit themselves) ---
+// --- My details ---
 const DETAIL_FIELDS = { business: "d-biz", address: "d-addr", regNo: "d-reg", vat: "d-vat", utr: "d-utr", email: "d-email", phone: "d-phone", payment: "d-pay" };
 
 async function openDetails() {
@@ -1303,9 +1337,9 @@ async function saveMyDetails() {
 
 document.getElementById("details-screen").addEventListener("input", () => startIdleTimer(QA_IDLE_MS));
 
-// --- Daily diary: notes plus before and after photos for each job, kept as a draft until submitted ---
+// --- Daily diary ---
 let dy = { entries: [], checkins: [], today: "", cur: null, dirty: false };
-const DY_MAX = 6;   // photos per section
+const DY_MAX = 6;
 const dyDay = (s) => s.slice(8, 10) + "/" + s.slice(5, 7);
 const dyMsg = (t, ok) => { const el = document.getElementById("dy-msg"); el.innerText = t; el.style.color = ok ? "#4ade80" : ""; };
 
@@ -1411,7 +1445,6 @@ function dyRemove(sec, i) {
     dyThumbs(sec);
 }
 
-// Photos already saved to Drive are fetched so the person can see them again
 async function dyLoadPhotos() {
     const c = dy.cur;
     if (!c || !c.id || !(c.before.length || c.after.length)) return;
@@ -1444,7 +1477,6 @@ async function saveDiary(submit) {
         });
         if (r.status !== "SUCCESS") { dyMsg(r.reason || "Something went wrong. Please try again."); return; }
         const e = r.entry;
-        // the server returns ids as: the ones kept, then the new ones in the order they were sent
         const rebuild = (list, ids) => {
             const kept = list.filter((p) => p.id), added = list.filter((p) => p.data);
             return kept.concat(added.map((p, i) => ({ id: ids[kept.length + i], url: p.data })));
@@ -1492,7 +1524,6 @@ function diaryBack() {
     goHome();
 }
 
-// photos picked from the camera or the gallery
 document.getElementById("diary-screen").addEventListener("change", async (e) => {
     const inp = e.target.closest("input[data-sec]");
     if (!inp || !dy.cur) return;
@@ -1512,7 +1543,7 @@ document.getElementById("dy-notes").addEventListener("input", () => { dy.dirty =
 function openFaq() { showScreen("faq", "Help & FAQ", "Common questions"); }
 function closeFaq() { showScreen("pin", "Site Login", "Enter your PIN"); }
 
-// --- Keyboard entry on the PIN screen (handy on desktop) ---
+// --- Keyboard entry on the PIN screen ---
 document.addEventListener("keydown", (e) => {
     if (document.getElementById("pin-screen").classList.contains("hidden")) return;
     if (/^\d$/.test(e.key)) pressKey(e.key);
@@ -1520,12 +1551,14 @@ document.addEventListener("keydown", (e) => {
     else if (e.key === "Enter") submitPin();
 });
 
-// --- Footer year ---
+// --- Footer year & static icons ---
 document.getElementById("footer-year").innerText = new Date().getFullYear();
+hydrateStaticIcons();
+updateUserPill("", "");
 
 showVersion();
 
-// --- Start-up: show anything waiting to send, and keep trying ---
+// --- Start-up ---
 updateQueueBanner();
 flushQueue();
 window.addEventListener("online", flushQueue);
