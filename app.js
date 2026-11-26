@@ -68,6 +68,12 @@ function initialsOf(name) {
     return ((parts[0][0] || "") + (parts.length > 1 ? parts[parts.length - 1][0] || "" : "")).toUpperCase();
 }
 
+function activeSiteLabel() {
+    if (!wasCheckedIn) return "";
+    const site = (userSites || []).find((s) => String(s.id) === String(checkedInSiteId));
+    return site && site.name ? `Checked In · ${site.name}` : "Checked In";
+}
+
 function updateUserPill(name, role) {
     const pill = document.getElementById("user-pill");
     if (!pill) return;
@@ -78,8 +84,17 @@ function updateUserPill(name, role) {
     }
     const escN = escHtml(name);
     const escR = escHtml(role || "Field");
-    pill.innerHTML = `<span class="user-avatar" aria-hidden="true">${escHtml(initialsOf(name))}</span><span class="user-meta"><b>${escN}</b><small>${escR}</small></span>`;
+    const ciText = activeSiteLabel();
+    const ciBadge = ciText
+        ? `<span class="ci-pill" title="${escHtml(ciText)}"><span class="ci-dot" aria-hidden="true"></span>${escHtml(ciText)}</span>`
+        : "";
+    pill.innerHTML = `<span class="user-avatar" aria-hidden="true">${escHtml(initialsOf(name))}</span><span class="user-meta"><b>${escN}</b><small>${escR}</small></span>${ciBadge}`;
     pill.classList.remove("hidden");
+}
+
+const DEFAULT_FEATURES = { attendance: true, qa: true, progress: true, applications: true, hours: true, qr: true, diary: true };
+function normalizeFeatures(raw) {
+    return Object.assign({}, DEFAULT_FEATURES, raw && typeof raw === "object" ? raw : {});
 }
 
 let userName = "";
@@ -88,7 +103,7 @@ let wasCheckedIn = false;
 let checkedInSiteId = "";
 let userRole = "Contractor";
 let userCanInvoice = true;
-let features = { attendance: true, qa: true, progress: true, applications: true, hours: true, qr: true, diary: true };   // sections this client has switched on
+let features = Object.assign({}, DEFAULT_FEATURES);   // sections this client has switched on
 let loggedIn = false;
 let currentScreen = "pin";
 let qaMode = "standard";   // "progress" = the Progress page: tick stages, then QA unlocks
@@ -181,7 +196,7 @@ async function submitPin() {
         }
 
         errorEl.innerText = "";
-        features = result.features || features;
+        features = normalizeFeatures(result.features);
         const home = roleHome(result.role || "Contractor");
         if (!home) {
             errorEl.innerText = "Nothing is switched on for your account yet. Please ask an admin.";
@@ -356,6 +371,7 @@ async function startCameraScanner() {
         { facingMode: "environment" },
         { fps: 10, qrbox: { width: 220, height: 220 } },
         (scannedSiteId) => {
+            // The camera can report the same code several times before it stops: only act once
             if (handlingScan) return;
             handlingScan = true;
             html5QrCode.stop().catch(() => {});
@@ -414,28 +430,34 @@ async function sendLog(siteId, lat, lng) {
         });
 
         if (result.status === "SUCCESS") {
+            // Success ends the session so the next person starts from the PIN screen
             setLocalCi(action === "Check-In", siteId);
             clearTimeout(idleTimer);
             showStatus(`✓ ${action} logged for ${result.name}`, "success");
             setTimeout(() => { appReload(); }, 3000);
         } else if (result.status === "ALREADY_CHECKED_IN") {
+            // Ask before doing anything; nothing has been logged yet
             pendingScan = { siteId: siteId, lat: lat, lng: lng };
             startIdleTimer();
             showStatus("You're already checked in here. Did you mean to check out?", "info");
             document.getElementById("confirm-box").classList.remove("hidden");
         } else if (result.status === "NO_CHECK_IN") {
+            // Ask before doing anything; nothing has been logged yet
             pendingScan = { siteId: siteId, lat: lat, lng: lng };
             startIdleTimer();
             showStatus("You're not checked in at this site. Did you mean to check in?", "info");
             document.getElementById("nocheckin-box").classList.remove("hidden");
         } else if (result.reason === "Invalid or Inactive PIN") {
+            // PIN was switched off mid-session: retrying can't help
             showStatus(`${action} failed: ${result.reason}.`, "error");
             setTimeout(() => { appReload(); }, 4000);
         } else {
+            // Stay logged in so they can try again
             showStatus(`${action} failed: ${result.reason || "unknown error"}.${result.logged ? " This attempt has been recorded." : ""}`, "error");
             showRetry();
         }
     } catch (err) {
+        // No signal: keep the scan on the phone (with the time and GPS position) and send it later
         enqueue({ queueId: queueId, pin: enteredPin, siteId: siteId, action: action, latitude: lat, longitude: lng, clientTime: scanTime });
         setLocalCi(action === "Check-In", siteId);
         clearTimeout(idleTimer);
@@ -546,16 +568,18 @@ async function submitManualCheckout() {
     }
 }
 
+// Typing a comment counts as activity, so the idle log-out doesn't interrupt it
 document.getElementById("manual-comment").addEventListener("input", startIdleTimer);
 
 // --- Quality Assurance inspection ---
+// The questions are kept by the admins (QA Checklist tab) and depend on the report type chosen.
 let QA_CHECKS = [];
 let qaType = "";
 let qaInstalls = [], qaInstallPrev = "", qaProjectPrev = "";
 let qaStages = [], qaHasSetup = true;
-const QA_IDLE_MS = 15 * 60 * 1000;
-const QA_MAX_PHOTOS = 6;
-const QA_MAX_PER_CHECK = 3;
+const QA_IDLE_MS = 15 * 60 * 1000;   // longer idle limit while filling in a report
+const QA_MAX_PHOTOS = 6;          // extra photos at the end of the form
+const QA_MAX_PER_CHECK = 3;       // photos per question
 let qaPhotos = [];
 let qaCheckPhotos = {};
 let qaResults = {};
@@ -588,6 +612,7 @@ async function openQa(mode) {
     qaMsg("");
     const proj = document.getElementById("qa-project");
     if (!loadQaDraft()) {
+        // If they're checked in, default the project to the site they're checked in at
         if (!proj.value && checkedInSiteId) proj.value = checkedInSiteId;
         qaProjectPrev = proj.value;
         loadQaInstalls(proj.value);
@@ -596,6 +621,7 @@ async function openQa(mode) {
     startIdleTimer(QA_IDLE_MS);
 }
 
+// Project details for the chosen project (set on the project card in the dashboard)
 function showQaProject() {
     const s = userSites.find((x) => x.id === document.getElementById("qa-project").value) || {};
     document.getElementById("qa-projno").value = s.projectNo || "";
@@ -613,7 +639,7 @@ async function loadQaQuestions(type, draft) {
     try {
         const r = await callBackend({ type: "qaQuestions", pin: enteredPin, reportType: type,
                                       installId: qaMode === "progress" ? document.getElementById("qa-install").value : "", viaProgress: qaMode === "progress" });
-        if (document.getElementById("qa-type").value !== type) return;
+        if (document.getElementById("qa-type").value !== type) return;   // they changed their mind while loading
         if (r.status !== "SUCCESS") { QA_CHECKS = []; box.innerHTML = `<p class="error-msg">${escHtml(r.reason || "Could not load the questions.")}</p>`; return; }
         QA_CHECKS = r.questions;
         try { localStorage.setItem(key, JSON.stringify(r.questions)); } catch (err) {}
@@ -733,6 +759,7 @@ function applyQaDraft(d) {
     qaMsg("Draft restored. Add your photos again.", true);
 }
 
+// Returns true when a saved draft with a project was found (it then loads the installations itself)
 function loadQaDraft() {
     try {
         const d = JSON.parse(localStorage.getItem(qaDraftKey()) || "null");
@@ -744,6 +771,7 @@ function loadQaDraft() {
     } catch (err) { return false; }
 }
 
+// Installations the office has set up for the chosen project (cached on the phone for poor signal)
 async function loadQaInstalls(siteId, draft) {
     qaInstalls = []; qaStages = []; qaHasSetup = true;
     let offlineErr = "";
@@ -751,7 +779,7 @@ async function loadQaInstalls(siteId, draft) {
         const progress = qaMode === "progress", key = "qaInstalls:" + siteId;
         try {
             const r = await callBackend({ type: progress ? "progressList" : "qaInstalls", pin: enteredPin, siteId: siteId });
-            if (document.getElementById("qa-project").value !== siteId) return;
+            if (document.getElementById("qa-project").value !== siteId) return;   // they changed project while loading
             if (r.status === "SUCCESS") {
                 qaInstalls = r.installs;
                 if (progress) { qaStages = r.stages || []; qaHasSetup = r.hasSetup !== false; }
@@ -782,6 +810,7 @@ function fillQaInstalls(keep) {
     sel.value = keep || "";
 }
 
+// A listed installation fills the details and the report type; Ad hoc lets the inspector type them in
 function applyQaInstall(id, d) {
     const adhoc = id === "__adhoc", inst = qaInstalls.find((i) => i.id === id);
     const fields = { ref: "qa-ref", phase: "qa-phase", level: "qa-level", drawings: "qa-drawings" };
@@ -804,6 +833,7 @@ function applyQaInstall(id, d) {
     loadQaQuestions(qaType, d);
 }
 
+// ---- Progress page: tick the payment stages; the QA form below unlocks when every stage is ticked ----
 const canQa = () => userRole === "QA" || userRole === "Contractor/QA";
 const qaInstObj = () => qaInstalls.find((i) => i.id === document.getElementById("qa-install").value);
 const qaStagesComplete = (inst) => !!inst && qaStages.length > 0 && qaStages.every((s) => (inst.done || []).indexOf(s.id) >= 0);
@@ -874,6 +904,7 @@ document.getElementById("qa-install").addEventListener("change", (e) => {
     applyQaInstall(next);
 });
 
+// Report type can only be changed for an ad hoc installation
 document.getElementById("qa-type").addEventListener("change", (e) => {
     const next = e.target.value;
     if (next !== qaType && hasQaWork() && !confirm("Changing the report type clears your answers and photos for the questions. Continue?")) { e.target.value = qaType; return; }
@@ -935,6 +966,7 @@ document.getElementById("qa-checks").addEventListener("click", (e) => {
     if (b) setQaResult(b.parentElement.dataset.id, b.dataset.r);
 });
 
+// photos for a single question
 document.getElementById("qa-checks").addEventListener("change", async (e) => {
     const inp = e.target.closest("input[data-q]");
     if (!inp) return;
@@ -951,6 +983,7 @@ document.getElementById("qa-file").addEventListener("change", async (e) => {
     renderThumbs();
 });
 
+// Typing or tapping in the report counts as activity
 ["input", "click"].forEach((ev) =>
     document.getElementById("qa-screen").addEventListener(ev, () => startIdleTimer(QA_IDLE_MS)));
 
@@ -965,7 +998,7 @@ const dmyShort = (s) => s.slice(8, 10) + "/" + s.slice(5, 7);
 const hmText = (m) => `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
 const gbp = (n) => "\u00A3" + Number(n).toFixed(2);
 
-function weekRange() {
+function weekRange() {   // Monday to Sunday
     const d = new Date();
     d.setHours(12, 0, 0, 0);
     d.setDate(d.getDate() - ((d.getDay() + 6) % 7) + weekOffset * 7);
@@ -988,6 +1021,7 @@ function dayMinutes() {
 
 function openHours() {
     weekOffset = 0;
+    // invoice buttons stay hidden unless this person has invoicing on (known from login), so they never flash up
     document.getElementById("btn-prepare").classList.toggle("hidden", !userCanInvoice);
     document.getElementById("btn-myinv").classList.toggle("hidden", !userCanInvoice);
     document.getElementById("btn-details").classList.toggle("hidden", !userCanInvoice);
@@ -999,7 +1033,7 @@ function openHours() {
 function hoursBack() { goHome(); }
 
 function shiftWeek(n) {
-    weekOffset = Math.min(0, weekOffset + n);
+    weekOffset = Math.min(0, weekOffset + n);   // no future weeks
     loadHours();
 }
 
@@ -1012,7 +1046,7 @@ async function loadHours() {
         if (r.status !== "SUCCESS") { msg.innerText = r.reason || "Could not load your hours."; return; }
         msg.innerText = "";
         hoursData = { from: from, to: to, shifts: r.shifts, incomplete: r.incomplete, invoice: r.invoice, details: r.details || {}, canInvoice: r.canInvoice !== false };
-        const invOn = r.canInvoice !== false;
+        const invOn = r.canInvoice !== false;   // invoicing can be switched off per person
         document.getElementById("btn-prepare").classList.toggle("hidden", !invOn);
         document.getElementById("btn-myinv").classList.toggle("hidden", !invOn);
         document.getElementById("btn-details").classList.toggle("hidden", !invOn);
@@ -1166,6 +1200,7 @@ function queueNote(msg, ok) {
     noteTimer = setTimeout(() => el.classList.add("hidden"), 20000);
 }
 
+// What this phone last knew about whether you're checked in (used only when there is no signal)
 function setLocalCi(on, siteId) {
     if (!pinHash) return;
     try {
@@ -1185,22 +1220,22 @@ async function offlineLogin() {
     try {
         const h = await sha256(enteredPin);
         const k = JSON.parse(localStorage.getItem("known:" + h) || "null");
-        if (!k || k.role === "QA" || k.role === "Admin") return false;
+        if (!k || k.role === "QA" || k.role === "Admin") return false;   // attendance only
         pinHash = h;
         userName = k.name;
         userSites = k.sites || [];
         userRole = k.role || "Contractor";
         userCanInvoice = k.canInvoice !== false;
-        features = k.features || features;
-        if (!features.attendance) return false;
+        features = normalizeFeatures(k.features);
+        if (!features.attendance) return false;   // offline mode is for check-in / check-out only
         updateHoursLabels();
         loggedIn = true;
-        updateUserPill(userName, userRole);
-        buildNav();
-        applyFeatures();
         const ci = getLocalCi();
         wasCheckedIn = !!ci;
         checkedInSiteId = ci ? ci.siteId : "";
+        updateUserPill(userName, userRole);
+        buildNav();
+        applyFeatures();
         document.querySelectorAll(".back-btn, .hours-btn").forEach((b) => b.classList.add("hidden"));
         document.getElementById("pin-error").innerText = "";
         queueNote("No signal: offline mode. Scan the site QR code as normal. Your scan is saved on this phone and sent when you're back online. It is NOT recorded until then.", false);
@@ -1219,7 +1254,7 @@ async function flushQueue() {
             let r;
             try {
                 r = await callBackend(Object.assign({ type: "log", queued: true }, item));
-            } catch (err) { break; }
+            } catch (err) { break; }   // still no signal: try again later
             setQueue(getQueue().filter((x) => x.queueId !== item.queueId));
             if (r.status === "SUCCESS") queueNote(`✓ Your saved ${item.action} from ${when} has been recorded.`, true);
             else if (r.status === "NO_CHECK_IN") queueNote(`Your saved ${item.action} from ${when} wasn't recorded: you weren't checked in at that site. Tell an admin if this is wrong.`, false);
@@ -1229,7 +1264,7 @@ async function flushQueue() {
     } finally { flushing = false; }
 }
 
-// --- My invoices ---
+// --- My invoices (current and previous tax year) ---
 let myInvoices = [];
 
 async function openMyInvoices() {
@@ -1266,13 +1301,14 @@ async function openMyInvoices() {
 
 function downloadMyInvoice(i) { printInvoice(myInvoices[i]); }
 
+// People with invoicing switched off only see "hours", never "invoice"
 function updateHoursLabels() {
     const sub = document.getElementById("hrs-sub");
     if (sub) sub.innerText = userCanInvoice ? "View Hours & Create Invoice" : "View Hours";
     document.querySelectorAll(".hours-btn").forEach((b) => { b.innerText = userCanInvoice ? "My hours & invoices" : "My hours"; });
 }
 
-// --- Install as an app ---
+// --- Install as an app (Android Chrome offers this; iPhone uses Share > Add to Home Screen) ---
 let installPrompt = null;
 const isInstalled = () => window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
 
@@ -1292,7 +1328,7 @@ document.getElementById("install-btn").addEventListener("click", async () => {
 
 window.addEventListener("appinstalled", () => document.getElementById("install-btn").classList.add("hidden"));
 
-// --- My details ---
+// --- My details (invoice details the contractor can edit themselves) ---
 const DETAIL_FIELDS = { business: "d-biz", address: "d-addr", regNo: "d-reg", vat: "d-vat", utr: "d-utr", email: "d-email", phone: "d-phone", payment: "d-pay" };
 
 async function openDetails() {
@@ -1337,9 +1373,9 @@ async function saveMyDetails() {
 
 document.getElementById("details-screen").addEventListener("input", () => startIdleTimer(QA_IDLE_MS));
 
-// --- Daily diary ---
+// --- Daily diary: notes plus before and after photos for each job, kept as a draft until submitted ---
 let dy = { entries: [], checkins: [], today: "", cur: null, dirty: false };
-const DY_MAX = 6;
+const DY_MAX = 6;   // photos per section
 const dyDay = (s) => s.slice(8, 10) + "/" + s.slice(5, 7);
 const dyMsg = (t, ok) => { const el = document.getElementById("dy-msg"); el.innerText = t; el.style.color = ok ? "#4ade80" : ""; };
 
@@ -1445,6 +1481,7 @@ function dyRemove(sec, i) {
     dyThumbs(sec);
 }
 
+// Photos already saved to Drive are fetched so the person can see them again
 async function dyLoadPhotos() {
     const c = dy.cur;
     if (!c || !c.id || !(c.before.length || c.after.length)) return;
@@ -1477,6 +1514,7 @@ async function saveDiary(submit) {
         });
         if (r.status !== "SUCCESS") { dyMsg(r.reason || "Something went wrong. Please try again."); return; }
         const e = r.entry;
+        // the server returns ids as: the ones kept, then the new ones in the order they were sent
         const rebuild = (list, ids) => {
             const kept = list.filter((p) => p.id), added = list.filter((p) => p.data);
             return kept.concat(added.map((p, i) => ({ id: ids[kept.length + i], url: p.data })));
@@ -1524,6 +1562,7 @@ function diaryBack() {
     goHome();
 }
 
+// photos picked from the camera or the gallery
 document.getElementById("diary-screen").addEventListener("change", async (e) => {
     const inp = e.target.closest("input[data-sec]");
     if (!inp || !dy.cur) return;
@@ -1543,7 +1582,7 @@ document.getElementById("dy-notes").addEventListener("input", () => { dy.dirty =
 function openFaq() { showScreen("faq", "Help & FAQ", "Common questions"); }
 function closeFaq() { showScreen("pin", "Site Login", "Enter your PIN"); }
 
-// --- Keyboard entry on the PIN screen ---
+// --- Keyboard entry on the PIN screen (handy on desktop) ---
 document.addEventListener("keydown", (e) => {
     if (document.getElementById("pin-screen").classList.contains("hidden")) return;
     if (/^\d$/.test(e.key)) pressKey(e.key);
@@ -1558,7 +1597,7 @@ updateUserPill("", "");
 
 showVersion();
 
-// --- Start-up ---
+// --- Start-up: show anything waiting to send, and keep trying ---
 updateQueueBanner();
 flushQueue();
 window.addEventListener("online", flushQueue);
