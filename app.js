@@ -43,6 +43,7 @@ let userCanInvoice = true;
 let features = { attendance: true, qa: true, progress: true, applications: true, hours: true, qr: true, diary: true };   // sections this client has switched on
 let loggedIn = false;
 let currentScreen = "pin";
+let qaMode = "standard";   // "progress" = the Progress page: tick stages, then QA unlocks
 let atSentinel = false;   // true while the browser history holds one extra entry for "not on the home screen"
 let ignorePop = 0;
 let enteredPin = "";
@@ -507,7 +508,7 @@ document.getElementById("manual-comment").addEventListener("input", startIdleTim
 let QA_CHECKS = [];
 let qaType = "";
 let qaInstalls = [], qaInstallPrev = "", qaProjectPrev = "";
-let qaMode = "standard", qaStages = [], qaHasSetup = true;   // "progress" = the Progress page: tick stages, then QA unlocks
+let qaStages = [], qaHasSetup = true;
 const QA_IDLE_MS = 15 * 60 * 1000;   // longer idle limit while filling in a report
 const QA_MAX_PHOTOS = 6;          // extra photos at the end of the form
 const QA_MAX_PER_CHECK = 3;       // photos per question
@@ -516,7 +517,6 @@ let qaCheckPhotos = {};
 let qaResults = {};
 
 const escHtml = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const jsArg = (v) => escHtml(JSON.stringify(String(v)));
 const qaMsg = (t, ok) => {
     const el = document.getElementById("qa-msg");
     el.innerText = t;
@@ -1103,4 +1103,431 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 
 const getQueue = () => { try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || "[]"); } catch (err) { return []; } };
 
 async function sha256(t) {
-    const b = await crypto.subtle.digest("SHA-256", new TextEncoder
+    const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("igl:" + t));
+    return Array.from(new Uint8Array(b)).map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+function updateQueueBanner() {
+    const n = getQueue().length, el = document.querySelector(".queue-banner");
+    if (!el) return;
+    el.classList.toggle("hidden", !n);
+    el.innerText = `${n} scan${n === 1 ? "" : "s"} saved on this phone, waiting for signal. ${n === 1 ? "It" : "They"} will send automatically.`;
+}
+
+function setQueue(q) {
+    try { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); } catch (err) {}
+    updateQueueBanner();
+}
+
+function enqueue(item) { const q = getQueue(); q.push(item); setQueue(q); }
+
+function queueNote(msg, ok) {
+    const el = document.getElementById("queue-note");
+    if (!el) return;
+    el.innerText = msg;
+    el.classList.toggle("ok", !!ok);
+    el.classList.remove("hidden");
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(() => el.classList.add("hidden"), 20000);
+}
+
+// What this phone last knew about whether you're checked in (used only when there is no signal)
+function setLocalCi(on, siteId) {
+    if (!pinHash) return;
+    try {
+        if (on) localStorage.setItem("ci:" + pinHash, JSON.stringify({ day: isoDate(new Date()), siteId: siteId }));
+        else localStorage.removeItem("ci:" + pinHash);
+    } catch (err) {}
+}
+
+function getLocalCi() {
+    try {
+        const c = JSON.parse(localStorage.getItem("ci:" + pinHash) || "null");
+        return c && c.day === isoDate(new Date()) ? c : null;
+    } catch (err) { return null; }
+}
+
+async function offlineLogin() {
+    try {
+        const h = await sha256(enteredPin);
+        const k = JSON.parse(localStorage.getItem("known:" + h) || "null");
+        if (!k || k.role === "QA" || k.role === "Admin") return false;   // attendance only
+        pinHash = h;
+        userName = k.name;
+        userSites = k.sites || [];
+        userRole = k.role || "Contractor";
+        userCanInvoice = k.canInvoice !== false;
+        features = k.features || features;
+        if (!features.attendance) return false;   // offline mode is for check-in / check-out only
+        updateHoursLabels();
+        loggedIn = true;
+        buildNav();
+        applyFeatures();
+        const ci = getLocalCi();
+        wasCheckedIn = !!ci;
+        checkedInSiteId = ci ? ci.siteId : "";
+        document.querySelectorAll(".back-btn, .hours-btn").forEach((b) => b.classList.add("hidden"));
+        document.getElementById("pin-error").innerText = "";
+        queueNote("No signal: offline mode. Scan the site QR code as normal. Your scan is saved on this phone and sent when you're back online. It is NOT recorded until then.", false);
+        openAttendance();
+        return true;
+    } catch (err) { return false; }
+}
+
+async function flushQueue() {
+    if (flushing) return;
+    flushing = true;
+    try {
+        while (getQueue().length) {
+            const item = getQueue()[0];
+            const when = new Date(item.clientTime).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+            let r;
+            try {
+                r = await callBackend(Object.assign({ type: "log", queued: true }, item));
+            } catch (err) { break; }   // still no signal: try again later
+            setQueue(getQueue().filter((x) => x.queueId !== item.queueId));
+            if (r.status === "SUCCESS") queueNote(`✓ Your saved ${item.action} from ${when} has been recorded.`, true);
+            else if (r.status === "NO_CHECK_IN") queueNote(`Your saved ${item.action} from ${when} wasn't recorded: you weren't checked in at that site. Tell an admin if this is wrong.`, false);
+            else if (r.status === "ALREADY_CHECKED_IN") queueNote(`Your saved ${item.action} from ${when} wasn't recorded: you were already checked in. Tell an admin if this is wrong.`, false);
+            else queueNote(`Your saved ${item.action} from ${when} couldn't be recorded: ${r.reason || "unknown error"}. Tell an admin.`, false);
+        }
+    } finally { flushing = false; }
+}
+
+// --- My invoices (current and previous tax year) ---
+let myInvoices = [];
+
+async function openMyInvoices() {
+    showScreen("invlist", "My Invoices", "Download your invoices");
+    startIdleTimer(QA_IDLE_MS);
+    const msg = document.getElementById("invlist-msg"), body = document.getElementById("invlist-body"), sum = document.getElementById("invlist-summary");
+    msg.innerText = "Loading...";
+    body.innerHTML = "";
+    sum.classList.add("hidden");
+    try {
+        const r = await callBackend({ type: "myInvoices", pin: enteredPin });
+        if (r.status !== "SUCCESS") { msg.innerText = r.reason || "Could not load your invoices."; return; }
+        msg.innerText = "";
+        myInvoices = r.invoices;
+        if (r.history && r.taxYear) {
+            const t = r.taxYear;
+            sum.innerHTML = `<b>This tax year</b> (from ${dmyFull(t.thisStart)})<br>${t.thisHours.toFixed(2)} hours | ${gbp(t.thisTotal)}` +
+                            `<br><br><b>Last tax year</b> (from ${dmyFull(t.lastStart)})<br>${t.lastHours.toFixed(2)} hours | ${gbp(t.lastTotal)}`;
+            sum.classList.remove("hidden");
+        }
+        document.getElementById("invlist-note").innerText = r.history
+            ? "Showing this tax year and last tax year (6 April to 5 April). Totals add up the invoices you've submitted."
+            : "Invoice history is switched off for your account, so only your most recent invoice is shown.";
+        body.innerHTML = myInvoices.length
+            ? myInvoices.map((inv, i) =>
+                `<div class="inv-card"><div><b>${dmyFull(inv.from)} - ${dmyFull(inv.to)}</b><br>${inv.totalHours.toFixed(2)} hours | ${gbp(inv.totalAmount)}<br>` +
+                `<small>${escHtml(inv.id)} | submitted ${dmyFull(inv.submitted.slice(0, 10))}</small></div>` +
+                `<button type="button" onclick="downloadMyInvoice(${i})">PDF</button></div>`).join("")
+            : "<p class='note-small'>No invoices yet.</p>";
+    } catch (err) {
+        msg.innerText = "Network issue. Please try again.";
+    }
+}
+
+function downloadMyInvoice(i) { printInvoice(myInvoices[i]); }
+
+// People with invoicing switched off only see "hours", never "invoice"
+function updateHoursLabels() {
+    const sub = document.getElementById("hrs-sub");
+    if (sub) sub.innerText = userCanInvoice ? "View Hours & Create Invoice" : "View Hours";
+    document.querySelectorAll(".hours-btn").forEach((b) => { b.innerText = userCanInvoice ? "My hours & invoices" : "My hours"; });
+}
+
+// --- Install as an app (Android Chrome offers this; iPhone uses Share > Add to Home Screen) ---
+let installPrompt = null;
+const isInstalled = () => window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+
+window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    installPrompt = e;
+    if (!isInstalled()) document.getElementById("install-btn").classList.remove("hidden");
+});
+
+document.getElementById("install-btn").addEventListener("click", async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    await installPrompt.userChoice;
+    installPrompt = null;
+    document.getElementById("install-btn").classList.add("hidden");
+});
+
+window.addEventListener("appinstalled", () => document.getElementById("install-btn").classList.add("hidden"));
+
+// --- My details (invoice details the contractor can edit themselves) ---
+const DETAIL_FIELDS = { business: "d-biz", address: "d-addr", regNo: "d-reg", vat: "d-vat", utr: "d-utr", email: "d-email", phone: "d-phone", payment: "d-pay" };
+
+async function openDetails() {
+    showScreen("details", "My Details", "Used on your invoices");
+    startIdleTimer(QA_IDLE_MS);
+    const msg = document.getElementById("details-msg");
+    msg.style.color = "";
+    msg.innerText = "Loading...";
+    try {
+        const r = await callBackend({ type: "myDetails", pin: enteredPin });
+        if (r.status !== "SUCCESS") { msg.innerText = r.reason || "Could not load your details."; return; }
+        for (const k in DETAIL_FIELDS) document.getElementById(DETAIL_FIELDS[k]).value = r.details[k] || "";
+        msg.innerText = "";
+    } catch (err) {
+        msg.innerText = "Network issue. Please try again.";
+    }
+}
+
+async function saveMyDetails() {
+    if (busy) return;
+    const msg = document.getElementById("details-msg"), details = {};
+    for (const k in DETAIL_FIELDS) details[k] = document.getElementById(DETAIL_FIELDS[k]).value;
+    busy = true;
+    msg.style.color = "#4ade80";
+    msg.innerText = "Saving...";
+    try {
+        const r = await callBackend({ type: "saveDetails", pin: enteredPin, details: details });
+        if (r.status === "SUCCESS") {
+            if (hoursData) hoursData.details = r.details;
+            msg.innerText = "✓ Saved. These will be used on your next invoice.";
+        } else {
+            msg.style.color = "";
+            msg.innerText = r.reason || "Something went wrong. Please try again.";
+        }
+    } catch (err) {
+        msg.style.color = "";
+        msg.innerText = "Network issue. Please try again.";
+    } finally {
+        busy = false;
+    }
+}
+
+document.getElementById("details-screen").addEventListener("input", () => startIdleTimer(QA_IDLE_MS));
+
+// --- Daily diary: notes plus before and after photos for each job, kept as a draft until submitted ---
+let dy = { entries: [], checkins: [], today: "", cur: null, dirty: false };
+const DY_MAX = 6;   // photos per section
+const dyDay = (s) => s.slice(8, 10) + "/" + s.slice(5, 7);
+const dyMsg = (t, ok) => { const el = document.getElementById("dy-msg"); el.innerText = t; el.style.color = ok ? "#4ade80" : ""; };
+
+async function openDiary() {
+    showScreen("diary", "Daily Diary", "Notes and photos for each job");
+    startIdleTimer(QA_IDLE_MS);
+    document.getElementById("dy-edit").classList.add("hidden");
+    document.getElementById("dy-list").classList.remove("hidden");
+    dy.cur = null;
+    dy.dirty = false;
+    await dyLoad();
+}
+
+async function dyLoad() {
+    const box = document.getElementById("dy-cards");
+    box.innerHTML = '<p class="note-small">Loading...</p>';
+    try {
+        const r = await callBackend({ type: "diaryToday", pin: enteredPin });
+        if (r.status !== "SUCCESS") { box.innerHTML = `<p class="error-msg">${escHtml(r.reason || "Could not load your diary.")}</p>`; return; }
+        dy.entries = r.entries; dy.checkins = r.checkins; dy.today = r.today;
+        renderDiaryList();
+    } catch (err) {
+        box.innerHTML = '<p class="error-msg">No signal. The diary needs a signal to load and save. Please try again.</p>';
+    }
+}
+
+function renderDiaryList() {
+    const todayE = dy.entries.filter((e) => e.date === dy.today), older = dy.entries.filter((e) => e.date !== dy.today), have = {};
+    todayE.forEach((e) => { have[e.siteId] = true; });
+    const pending = dy.checkins.filter((c) => !have[c.siteId]);
+    const pill = (e) => e.status === "Submitted" ? '<span class="dy-pill done">Submitted</span>' : '<span class="dy-pill draft">Draft</span>';
+    const entryCard = (e) => `<button type="button" class="dy-card" onclick="dyOpenEntry('${escHtml(e.id)}')"><span><b>${escHtml(e.siteName)}</b>` +
+        `<small>${e.date === dy.today ? "Today" : dyDay(e.date)} | ${e.before.length} before, ${e.after.length} after</small></span>${pill(e)}</button>`;
+    let html = todayE.map(entryCard).join("") +
+        pending.map((c) => `<button type="button" class="dy-card" onclick="dyStartNew('${escHtml(c.siteId)}')"><span><b>${escHtml(c.siteName)}</b>` +
+            `<small>Checked in today. Tap to start your diary.</small></span><span class="dy-pill">Not started</span></button>`).join("");
+    if (!todayE.length && !pending.length) html += '<p class="note-small">Nothing started for today yet. Check in at a site, or add an entry below.</p>';
+    if (older.length) html += '<h3 class="dy-sub">Unfinished from earlier days</h3>' + older.map(entryCard).join("");
+    document.getElementById("dy-cards").innerHTML = html;
+
+    const taken = {};
+    todayE.forEach((e) => { taken[e.siteId] = true; });
+    pending.forEach((c) => { taken[c.siteId] = true; });
+    const free = userSites.filter((x) => !taken[x.id]);
+    document.getElementById("dy-site").innerHTML = '<option value="">Choose a project...</option>' + free.map((x) => `<option value="${escHtml(x.id)}">${escHtml(x.name)}</option>`).join("");
+    document.getElementById("dy-add").classList.toggle("hidden", !free.length);
+}
+
+function dyStartSelected() {
+    const id = document.getElementById("dy-site").value;
+    if (!id) return;
+    dyStartNew(id);
+}
+
+function dyStartNew(siteId) {
+    const site = userSites.find((x) => x.id === siteId) || dy.checkins.find((c) => c.siteId === siteId);
+    if (!site) return;
+    dyEdit({ id: "", date: dy.today, siteId: siteId, siteName: site.name || site.siteName, status: "New", notes: "", before: [], after: [] });
+}
+
+function dyOpenEntry(id) {
+    const e = dy.entries.find((x) => x.id === id);
+    if (!e) return;
+    dyEdit({ id: e.id, date: e.date, siteId: e.siteId, siteName: e.siteName, status: e.status, notes: e.notes,
+             before: e.before.map((p) => ({ id: p })), after: e.after.map((p) => ({ id: p })) });
+    dyLoadPhotos();
+}
+
+function dyEdit(cur) {
+    dy.cur = cur;
+    dy.dirty = false;
+    const ro = cur.status === "Submitted";
+    document.getElementById("dy-list").classList.add("hidden");
+    document.getElementById("dy-edit").classList.remove("hidden");
+    document.getElementById("dy-title").innerText = cur.siteName;
+    document.getElementById("dy-meta").innerText = (cur.date === dy.today ? "Today" : dyDay(cur.date)) + " | " + (ro ? "Submitted" : cur.status === "Draft" ? "Draft saved" : "New entry");
+    const notes = document.getElementById("dy-notes");
+    notes.value = cur.notes;
+    notes.readOnly = ro;
+    ["dy-btns-b", "dy-btns-a", "dy-save", "dy-submit"].forEach((id) => document.getElementById(id).classList.toggle("hidden", ro));
+    document.getElementById("dy-discard").classList.toggle("hidden", ro || !cur.id);
+    dyMsg("");
+    dyThumbs("b");
+    dyThumbs("a");
+    window.scrollTo(0, 0);
+}
+
+function dyThumbs(sec) {
+    const c = dy.cur, list = sec === "b" ? c.before : c.after, ro = c.status === "Submitted";
+    const box = document.getElementById("dy-thumbs-" + sec);
+    box.className = "thumbs" + (ro ? " big" : "");
+    box.innerHTML = list.map((p, i) => {
+        const src = p.data || p.url;
+        return `<div class="thumb">${src ? `<img src="${src}" alt="Photo ${i + 1}">` : '<div style="width:100%;height:60px;background:#334155;border-radius:8px"></div>'}` +
+               (ro ? "" : `<button type="button" onclick="dyRemove('${sec}', ${i})">&times;</button>`) + "</div>";
+    }).join("");
+    document.getElementById("dy-count-" + sec).innerText = ro ? "" : `(${list.length} of ${DY_MAX})`;
+}
+
+function dyRemove(sec, i) {
+    (sec === "b" ? dy.cur.before : dy.cur.after).splice(i, 1);
+    dy.dirty = true;
+    dyThumbs(sec);
+}
+
+// Photos already saved to Drive are fetched so the person can see them again
+async function dyLoadPhotos() {
+    const c = dy.cur;
+    if (!c || !c.id || !(c.before.length || c.after.length)) return;
+    try {
+        const r = await callBackend({ type: "diaryPhotos", pin: enteredPin, entryId: c.id });
+        if (r.status !== "SUCCESS" || dy.cur !== c) return;
+        c.before.forEach((p, i) => { if (p.id && r.before[i]) p.url = r.before[i]; });
+        c.after.forEach((p, i) => { if (p.id && r.after[i]) p.url = r.after[i]; });
+        dyThumbs("b");
+        dyThumbs("a");
+    } catch (err) {}
+}
+
+async function saveDiary(submit) {
+    if (busy || !dy.cur) return;
+    const c = dy.cur, notes = document.getElementById("dy-notes").value.trim();
+    if (submit) {
+        if (!notes) return dyMsg("Please write what was done today.");
+        if (!c.before.length || !c.after.length) return dyMsg("Please add at least one before photo and one after photo, or save a draft and add the after photos later.");
+    } else if (!notes && !c.before.length && !c.after.length) {
+        return dyMsg("Add some notes or a photo first.");
+    }
+    busy = true;
+    dyMsg(submit ? "Submitting. Uploading photos can take a minute..." : "Saving your draft. Uploading photos can take a minute...", true);
+    try {
+        const r = await callBackend({
+            type: "diarySave", pin: enteredPin, entryId: c.id, siteId: c.siteId, notes: notes, submit: submit,
+            keepBefore: c.before.filter((p) => p.id).map((p) => p.id), keepAfter: c.after.filter((p) => p.id).map((p) => p.id),
+            addBefore: c.before.filter((p) => p.data).map((p) => p.data), addAfter: c.after.filter((p) => p.data).map((p) => p.data)
+        });
+        if (r.status !== "SUCCESS") { dyMsg(r.reason || "Something went wrong. Please try again."); return; }
+        const e = r.entry;
+        // the server returns ids as: the ones kept, then the new ones in the order they were sent
+        const rebuild = (list, ids) => {
+            const kept = list.filter((p) => p.id), added = list.filter((p) => p.data);
+            return kept.concat(added.map((p, i) => ({ id: ids[kept.length + i], url: p.data })));
+        };
+        c.before = rebuild(c.before, e.before);
+        c.after = rebuild(c.after, e.after);
+        c.id = e.id; c.date = e.date; c.status = e.status; c.notes = e.notes;
+        dy.dirty = false;
+        if (submit) {
+            dyMsg("✓ Diary submitted. Thank you.", true);
+            setTimeout(() => { if (currentScreen === "diary") openDiary(); }, 1500);
+        } else {
+            dyEdit(c);
+            dyMsg("✓ Draft saved. You can come back later today to add your after photos.", true);
+        }
+    } catch (err) {
+        dyMsg("No signal. Nothing was lost on this screen, please try again.");
+    } finally {
+        busy = false;
+    }
+}
+
+async function dyDiscard() {
+    if (busy || !dy.cur || !dy.cur.id) return;
+    if (!confirm("Delete this draft and its photos? This can't be undone.")) return;
+    busy = true;
+    try {
+        const r = await callBackend({ type: "diaryDiscard", pin: enteredPin, entryId: dy.cur.id });
+        if (r.status !== "SUCCESS") { dyMsg(r.reason || "Could not delete the draft."); return; }
+        dy.dirty = false;
+        openDiary();
+    } catch (err) {
+        dyMsg("No signal. Please try again.");
+    } finally {
+        busy = false;
+    }
+}
+
+function diaryBack() {
+    if (!document.getElementById("dy-edit").classList.contains("hidden")) {
+        if (dy.dirty && !confirm("You have unsaved changes. Leave without saving?")) return;
+        openDiary();
+        return;
+    }
+    goHome();
+}
+
+// photos picked from the camera or the gallery
+document.getElementById("diary-screen").addEventListener("change", async (e) => {
+    const inp = e.target.closest("input[data-sec]");
+    if (!inp || !dy.cur) return;
+    const list = inp.dataset.sec === "b" ? dy.cur.before : dy.cur.after;
+    const files = Array.from(inp.files);
+    if (files.length > DY_MAX - list.length) dyMsg(`Up to ${DY_MAX} photos in each section.`);
+    for (const f of files.slice(0, DY_MAX - list.length)) list.push({ data: await resizeImage(f) });
+    inp.value = "";
+    dy.dirty = true;
+    dyThumbs(inp.dataset.sec);
+});
+
+document.getElementById("dy-notes").addEventListener("input", () => { dy.dirty = true; });
+["input", "click"].forEach((ev) => document.getElementById("diary-screen").addEventListener(ev, () => startIdleTimer(QA_IDLE_MS)));
+
+// --- Help & FAQ ---
+function openFaq() { showScreen("faq", "Help & FAQ", "Common questions"); }
+function closeFaq() { showScreen("pin", "Site Login", "Enter your PIN"); }
+
+// --- Keyboard entry on the PIN screen (handy on desktop) ---
+document.addEventListener("keydown", (e) => {
+    if (document.getElementById("pin-screen").classList.contains("hidden")) return;
+    if (/^\d$/.test(e.key)) pressKey(e.key);
+    else if (e.key === "Backspace" && !busy) { enteredPin = enteredPin.slice(0, -1); updatePinDots(); }
+    else if (e.key === "Enter") submitPin();
+});
+
+// --- Footer year ---
+document.getElementById("footer-year").innerText = new Date().getFullYear();
+
+showVersion();
+
+// --- Start-up: show anything waiting to send, and keep trying ---
+updateQueueBanner();
+flushQueue();
+window.addEventListener("online", flushQueue);
+setInterval(flushQueue, 30000);
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
