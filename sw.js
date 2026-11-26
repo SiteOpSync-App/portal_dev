@@ -2,7 +2,7 @@
 // - At install it saves the main page files straight away, so the very first visit is covered too.
 // - When online it always fetches the latest copy (and refreshes the saved one).
 // - When offline it falls back to the saved copy. Requests to Apps Script (POST) are never touched.
-const CACHE = "site-portal-v3";   // change this number to force phones to clear their saved copy
+const CACHE = "site-portal-v1.25.0";   // bump this number to force phones to clear their saved copy
 const LIB = "https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js";
 const SHELL = ["./", "index.html", "style.css", "config.js", "branding.js", "app.js", "invoice.js", "manifest.json", "icon-192.png", "icon-512.png"];
 
@@ -36,9 +36,8 @@ self.addEventListener("fetch", (e) => {
             if (saved) return saved;
         }
         try {
-            const res = await fetch(req);
+            const res = await fetch(new Request(req, { cache: "no-store" }));
             if (res.ok || res.type === "opaque") {
-                await cache.delete(req, { ignoreSearch: true });   // keep only the newest copy of each file
                 await cache.put(req, res.clone());
             }
             return res;
