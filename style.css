@@ -138,7 +138,7 @@ body.portal-body {
     border-radius: 999px;
 }
 
-/* Header */
+/* Header & Logged-In User Pill */
 .app-header {
     margin-bottom: 18px;
     text-align: left;
@@ -169,11 +169,12 @@ body.portal-body {
 .brand-title-line {
     display: flex;
     align-items: center;
-    gap: 8px;
+    flex-wrap: wrap;
+    gap: 6px;
 }
 
 .app-header h1 {
-    font-size: 1.25rem;
+    font-size: 1.2rem;
     font-weight: 800;
     letter-spacing: -0.02em;
     color: #ffffff;
@@ -193,7 +194,58 @@ body.portal-body {
     padding: 2px 7px;
     border-radius: 6px;
     white-space: nowrap;
+    max-width: 115px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.user-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 2px 9px 2px 3px;
+    border-radius: 999px;
+    background: rgba(14, 165, 233, 0.14);
+    border: 1px solid rgba(56, 189, 248, 0.32);
+    max-width: 100%;
+    flex-shrink: 0;
+}
+
+.user-avatar {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent-sky), var(--accent-sky-dark));
+    color: #ffffff;
+    font-size: 0.64rem;
+    font-weight: 800;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.user-meta {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.12;
+    min-width: 0;
+}
+
+.user-meta b {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--text-main);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     max-width: 120px;
+}
+
+.user-meta small {
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
@@ -201,7 +253,7 @@ body.portal-body {
 .app-header p {
     font-size: 0.82rem;
     color: var(--text-muted);
-    margin-top: 2px;
+    margin-top: 3px;
 }
 
 .screen-card {
@@ -375,12 +427,17 @@ body.portal-body {
     height: 42px;
     border-radius: 12px;
     background: rgba(255, 255, 255, 0.05);
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.35rem;
     flex-shrink: 0;
 }
+
+.menu-card.attend .menu-icon { color: #38bdf8; background: rgba(14, 165, 233, 0.14); }
+.menu-card.qa .menu-icon { color: #34d399; background: rgba(16, 185, 129, 0.14); }
+.menu-card.prog .menu-icon { color: #fbbf24; background: rgba(245, 158, 11, 0.14); }
+.menu-card.diary .menu-icon { color: #f472b6; background: rgba(236, 72, 153, 0.14); }
+.menu-card.hrs .menu-icon { color: #c4b5fd; background: rgba(167, 139, 250, 0.14); }
 
 .menu-text {
     flex: 1;
@@ -636,17 +693,21 @@ body.portal-body {
 
 .qa-photo { margin-top: 8px; text-align: left; }
 .photo-drop {
-    display: block;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
     border: 1.5px dashed rgba(52, 211, 153, 0.45);
     background: rgba(16, 185, 129, 0.05);
     border-radius: 14px;
-    padding: 16px;
+    padding: 15px 12px;
     cursor: pointer;
     color: #34d399;
     font-weight: 700;
     font-size: 0.85rem;
 }
-.photo-drop.small { padding: 10px; font-size: 0.82rem; }
+.photo-drop.small { width: auto; padding: 10px 12px; font-size: 0.82rem; }
 .photo-drop.small small { color: #fbbf24; font-weight: 500; }
 
 .thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
@@ -742,6 +803,10 @@ body.portal-body {
 .dy-photo-btns { display: flex; gap: 8px; }
 .dy-photo-btns label {
     flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
     text-align: center;
     border: 1.5px dashed rgba(52, 211, 153, 0.45);
     background: rgba(16, 185, 129, 0.05);
@@ -809,6 +874,7 @@ body.portal-body {
 
 .bottom-nav button {
     flex: 1;
+    min-width: 0;
     background: none;
     border: none;
     color: var(--text-muted);
@@ -824,7 +890,38 @@ body.portal-body {
     transition: color 0.15s ease, background 0.15s ease;
 }
 
-.bottom-nav button span { font-size: 1.15rem; }
+.bottom-nav button .nav-ic,
+.menu-icon svg,
+.photo-drop-icon svg,
+.dy-btn-icon svg {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.bottom-nav button .nav-ic svg {
+    width: 19px;
+    height: 19px;
+}
+
+.menu-icon svg {
+    width: 21px;
+    height: 21px;
+}
+
+.photo-drop-icon svg,
+.dy-btn-icon svg {
+    width: 18px;
+    height: 18px;
+}
+
+.nav-lbl {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
 .bottom-nav button.on { color: #38bdf8; background: rgba(14, 165, 233, 0.12); }
 
 /* Footer */
