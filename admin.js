@@ -4,7 +4,6 @@ const APPS_SCRIPT_URL = SITE_CONFIG.appsScriptUrl;   // set per deployment in co
 // --- VERSION: current release is below. Keep ALL files on the same number (see README.md) ---
 const APP_VERSION = "1.26.0";
 let lastScriptV = "";
-let dlgCleanup = null;
 
 function cmpVer(a, b) {
     const x = String(a).split(".").map(Number), y = String(b).split(".").map(Number);
@@ -38,16 +37,12 @@ if (!token) location.href = "index.html";
 
 const $ = (id) => document.getElementById(id);
 const dlg = $("dlg");
-dlg.addEventListener("close", () => {
-    dlg.classList.remove("wide");
-    $("df").oninput = null;
-    $("df").onchange = null;
-    $("ds").innerText = "Save";
-    if (typeof dlgCleanup === "function") {
-        dlgCleanup();
-        dlgCleanup = null;
-    }
-});
+if (dlg) {
+    dlg.addEventListener("close", () => {
+        dlg.classList.remove("wide");
+        if ($("ds")) $("ds").innerText = "Save";
+    });
+}
 const state = { Users: [], Sites: [], logs: [], qa: null, qq: null, inv: null, attn: [], inst: null, features: null };
 
 // Sections this client has switched on (the server also refuses requests for the others)
@@ -55,10 +50,10 @@ const TAB_FEATURE = { diary: "diary", hours: "attendance", attention: "attendanc
 function feat(k) { return !state.features || state.features[k] !== false; }
 
 function applyAdminFeatures() {
-    document.querySelectorAll("nav button").forEach((b) => { const k = TAB_FEATURE[b.dataset.tab]; b.hidden = !!k && !feat(k); });
-    const active = document.querySelector("nav button.active");
+    document.querySelectorAll("nav button[data-tab]").forEach((b) => { const k = TAB_FEATURE[b.dataset.tab]; b.hidden = !!k && !feat(k); });
+    const active = document.querySelector("nav button[data-tab].active");
     if (active && active.hidden) {
-        const first = Array.from(document.querySelectorAll("nav button")).find((b) => !b.hidden);
+        const first = Array.from(document.querySelectorAll("nav button[data-tab]")).find((b) => !b.hidden);
         if (first) first.click();
     }
 }
@@ -102,39 +97,63 @@ async function api(op, extra) {
 
 function logout() { sessionStorage.clear(); location.href = "index.html"; }
 
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const jsArg = (v) => esc(JSON.stringify(String(v)));
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 // ---------- Refresh ----------
 function stamp() {
-    $("updated").innerText = "Updated " + new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    if ($("updated")) $("updated").innerText = "Updated " + new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 }
 
 async function refreshData() {
-    $("updated").innerText = "Refreshing...";
+    if ($("updated")) $("updated").innerText = "Refreshing...";
     await loadLists();
-    await Promise.all([feat("attendance") ? loadHours() : null, state.qa && feat("qa") ? loadQa() : null, state.inv && feat("hours") ? loadInv() : null,
-                       state.qq && feat("qa") ? loadQq() : null, feat("progress") ? loadInst() : null, feat("attendance") ? loadAttn() : null, feat("diary") && !$("diary").hidden ? loadDiary() : null]);
+    await Promise.all([
+        feat("attendance") ? loadHours() : null,
+        state.qa && feat("qa") ? loadQa() : null,
+        state.inv && feat("hours") ? loadInv() : null,
+        state.qq && feat("qa") ? loadQq() : null,
+        feat("progress") ? loadInst() : null,
+        feat("attendance") ? loadAttn() : null,
+        feat("diary") && $("diary") && !$("diary").hidden ? loadDiary() : null
+    ]);
 }
 
 // ---------- Tabs ----------
-document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
-    document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x === b));
-    ["hours", "diary", "attention", "invoices", "qareports", "qchecklist", "Users", "Sites", "installs", "applications", "qr"].forEach((t) => { $(t).hidden = t !== b.dataset.tab; });
-    if (b.dataset.tab === "attention") loadAttn();
-    if (b.dataset.tab === "qchecklist" && !state.qq) loadQq();
-    if (b.dataset.tab === "installs" && !state.inst) loadInst();
-    if (b.dataset.tab === "applications") loadApps();
-    if (b.dataset.tab === "diary") loadDiary();
-    if (b.dataset.tab === "invoices" && !state.inv) loadInv();
-    if (b.dataset.tab === "qareports" && !state.qa) loadQa();
-}));
+const ADMIN_TABS = ["hours", "diary", "attention", "invoices", "qareports", "qchecklist", "Users", "Sites", "installs", "applications", "qr"];
+
+function activateTab(tabId) {
+    if (!tabId) return;
+    document.querySelectorAll("nav button[data-tab]").forEach((x) => {
+        x.classList.toggle("active", x.dataset.tab === tabId);
+    });
+    ADMIN_TABS.forEach((t) => {
+        const el = $(t);
+        if (el) el.hidden = t !== tabId;
+    });
+    const runSafe = (fn) => {
+        try { if (typeof fn === "function") fn(); } catch (_) {}
+    };
+    if (tabId === "attention") runSafe(loadAttn);
+    if (tabId === "qchecklist" && !state.qq) runSafe(loadQq);
+    if (tabId === "installs" && !state.inst) runSafe(loadInst);
+    if (tabId === "applications") runSafe(loadApps);
+    if (tabId === "diary") runSafe(loadDiary);
+    if (tabId === "invoices" && !state.inv) runSafe(loadInv);
+    if (tabId === "qareports" && !state.qa) runSafe(loadQa);
+}
+
+document.addEventListener("click", (e) => {
+    const b = e.target.closest("nav button[data-tab]");
+    if (!b || b.hidden) return;
+    activateTab(b.dataset.tab);
+});
 
 // ---------- Users & Sites ----------
 async function loadLists() {
     const r = await api("list");
     if (r.status !== "SUCCESS") return alert(r.reason);
-    state.Users = r.Users; state.Sites = r.Sites;
+    state.Users = r.Users || [];
+    state.Sites = r.Sites || [];
     state.features = r.features || state.features;
     applyAdminFeatures();
     renderTable("Users"); renderTable("Sites"); fillQrSites(); fillInstSites(); fillAppSites(); stamp();
@@ -142,6 +161,7 @@ async function loadLists() {
 
 // Projects tab: one card per site, with the project details that fill the QA form header
 function renderSiteCards() {
+    if (!$("t-Sites")) return;
     const line = (l, x) => x ? `<div class="pl"><span>${l}</span>${esc(x)}</div>` : "";
     $("t-Sites").innerHTML = state.Sites.length ? state.Sites.map((r) => {
         const v = r.v, off = v[5] === "Inactive", n = (state.inst || []).filter((x) => x.v[1] === v[0]).length;
@@ -156,6 +176,7 @@ function renderSiteCards() {
 
 function renderTable(tab) {
     if (tab === "Sites") return renderSiteCards();
+    if (!$("t-" + tab)) return;
     const fields = SCHEMAS[tab].filter((f) => !f.hidden);
     const head = fields.map((f) => `<th>${esc(f.l.replace(/ \(.*/, ""))}</th>`).join("") + "<th></th>";
     const body = state[tab].map((r) => {
@@ -176,7 +197,7 @@ function openEdit(tab, row) {
         if (f.hidden) return "";
         const val = cur ? cur.v[i] : (f.o ? f.o[0] : (f.def || ""));
         const input = f.o
-            ? `<select data-i="${i}">${f.o.map((o) => `<option${o === val ? " selected" : ""}>${esc(o)}</option>`).join("")}</select>`
+            ? `<select data-i="${i}">${f.o.map((o) => `<option${o === val ? " selected" : ""}>${o}</option>`).join("")}</select>`
             : `<input data-i="${i}" value="${esc(val)}">`;
         return `<label class="field">${esc(f.l)}${input}</label>`;
     }).join("");
@@ -208,12 +229,9 @@ async function del(tab, row) {
 }
 
 // ---------- Hours ----------
-// Display dates as dd/mm/yyyy (data stays yyyy-mm-dd underneath)
-const dmy = (s) => String(s).replace(/^(\d{4})-(\d\d)-(\d\d)/, "$3/$2/$1");
-const dmyAll = (s) => String(s).replace(/(\d{4})-(\d\d)-(\d\d)/g, "$3/$2/$1");
-// Rows an admin has edited show as ADMIN UPDATED (also covers rows edited before this change)
+const dmy = (s) => String(s ?? "").replace(/^(\d{4})-(\d\d)-(\d\d)/, "$3/$2/$1");
+const dmyAll = (s) => String(s ?? "").replace(/(\d{4})-(\d\d)-(\d\d)/g, "$3/$2/$1");
 const statusOf = (v) => (v[13] && (v[5] === "MANUAL" || v[5] === "SUCCESS")) ? "ADMIN UPDATED" : v[5];
-// Distance + Google Maps link, from the check-in (H, I) and check-out (K, L) columns
 const isMap = (u) => /^https:\/\/www\.google\.com\/maps/.test(u);
 const locBit = (d, u, row, w) => (!d || d === "N/A") ? "-" : isMap(u) ? `<a href="#" onclick="showMap(${row}, '${w}'); return false;">${esc(d)} &#128205;</a>` : esc(d);
 const locCell = (v, row) => `In ${locBit(v[7], v[8], row, "in")}<br>Out ${locBit(v[10], v[11], row, "out")}`;
@@ -222,33 +240,34 @@ const mins = (a, b) => (toLocal(a) && toLocal(b)) ? Math.round((new Date(toLocal
 const hm = (m) => m === null ? "" : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
 
 function visibleLogs() {
-    const emp = $("f-emp").value.trim().toLowerCase();
+    const emp = ($("f-emp") ? $("f-emp").value : "").trim().toLowerCase();
+    const showFailed = $("f-failed") ? $("f-failed").checked : false;
     return state.logs.filter((r) =>
-        (r.v[5] !== "FAILED" || $("f-failed").checked) && (!emp || r.v[1].toLowerCase().includes(emp)));
+        (r.v[5] !== "FAILED" || showFailed) && (!emp || String(r.v[1] || "").toLowerCase().includes(emp)));
 }
 
 async function loadHours() {
-    const r = await api("logs", { from: $("f-from").value, to: $("f-to").value });
+    const r = await api("logs", { from: $("f-from")?.value || "", to: $("f-to")?.value || "" });
     if (r.status !== "SUCCESS") return alert(r.reason);
-    state.logs = r.rows.reverse();   // newest first
+    state.logs = (r.rows || []).reverse();
     renderHours();
     stamp();
 }
 
-// "On site" pill: shown in the Out column until the person checks out
 function isOpen(v) { return v[2] === "Check-In" && v[5] === "SUCCESS" && !v[9]; }
-function isOnSite(v) { return isOpen(v) && v[0].slice(0, 10) >= iso(new Date(Date.now() - 864e5)); }
+function isOnSite(v) { return isOpen(v) && String(v[0] || "").slice(0, 10) >= iso(new Date(Date.now() - 864e5)); }
 function openPill(v) {
     if (!isOpen(v)) return "";
     return isOnSite(v) ? '<span class="pill">On site</span>' : '<span class="pill warn">No check-out</span>';
 }
 
 function renderHours() {
+    if (!$("t-hours")) return;
     const rows = visibleLogs(), totals = {};
     const body = rows.map((r) => {
         const v = r.v, m = mins(v[0], v[9]);
         if (m !== null && v[5] !== "FAILED") totals[v[1]] = (totals[v[1]] || 0) + m;
-        const day = (v[0].match(/^\d{4}-\d\d-\d\d/) || v[9].match(/^\d{4}-\d\d-\d\d/) || [""])[0];
+        const day = (String(v[0] || "").match(/^\d{4}-\d\d-\d\d/) || String(v[9] || "").match(/^\d{4}-\d\d-\d\d/) || [""])[0];
         const st = statusOf(v), cls = st === "FAILED" ? "failed" : st === "MANUAL" ? "manual" : "";
         const note = [v[6], v[12]].filter(Boolean).join(" | ");
         return `<tr class="${cls}"><td>${dmy(day)}</td><td>${esc(v[1])}</td><td>${esc(v[4] || v[3])}</td>` +
@@ -258,15 +277,17 @@ function renderHours() {
     }).join("");
     $("t-hours").innerHTML = `<tr><th>Date</th><th>Employee</th><th>Site</th><th>In</th><th>Out</th><th>Hours</th><th>Location</th><th>Status</th><th>Notes</th><th>Admin comment</th><th></th></tr>${body}`;
     const onNow = rows.filter((r) => isOnSite(r.v)).length;
-    $("summary").innerHTML = (onNow ? `<span class="chip"><span class="dot"></span>${onNow} on site now</span>` : "") +
-        Object.keys(totals).sort().map((n) => `<span class="chip">${esc(n)}: <b>${hm(totals[n])}</b></span>`).join("");
+    if ($("summary")) {
+        $("summary").innerHTML = (onNow ? `<span class="chip"><span class="dot"></span>${onNow} on site now</span>` : "") +
+            Object.keys(totals).sort().map((n) => `<span class="chip">${esc(n)}: <b>${hm(totals[n])}</b></span>`).join("");
+    }
 }
 
 function editLog(row) {
     const r = findLog(row), v = r.v;
     $("dt").innerText = "Edit hours: " + v[1];
     $("de").innerText = "";
-    const prefill = v[13].replace(/^\[Edited by.*?\]( - )?/, "");
+    const prefill = String(v[13] || "").replace(/^\[Edited by.*?\]( - )?/, "");
     $("df").innerHTML =
         `<label class="field">Check-in<input type="datetime-local" id="e-in" value="${toLocal(v[0])}"></label>` +
         `<label class="field">Check-out<input type="datetime-local" id="e-out" value="${toLocal(v[9])}"></label>` +
@@ -295,27 +316,27 @@ async function delLog(row) {
 }
 
 function exportCsv() {
-    const q = (s) => `"${String(s).replace(/"/g, '""')}"`;
+    const q = (s) => `"${String(s ?? "").replace(/"/g, '""')}"`;
     const lines = [["Date", "Employee", "Site", "In", "Out", "Hours", "In Distance", "In Map", "Out Distance", "Out Map", "Status", "Notes", "Admin Comment"].join(",")];
     visibleLogs().forEach((r) => {
         const v = r.v, m = mins(v[0], v[9]);
-        const day = (v[0].match(/^\d{4}-\d\d-\d\d/) || v[9].match(/^\d{4}-\d\d-\d\d/) || [""])[0];
+        const day = (String(v[0] || "").match(/^\d{4}-\d\d-\d\d/) || String(v[9] || "").match(/^\d{4}-\d\d-\d\d/) || [""])[0];
         lines.push([dmy(day), v[1], v[4] || v[3], dmy(v[0]), dmy(v[9]), m === null ? "" : (m / 60).toFixed(2), v[7], v[8], v[10], v[11], statusOf(v), [v[6], v[12]].filter(Boolean).join(" | "), dmyAll(v[13])].map(q).join(","));
     });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
-    a.download = `attendance-${$("f-from").value}-to-${$("f-to").value}.csv`;
+    a.download = `attendance-${$("f-from")?.value || ""}-to-${$("f-to")?.value || ""}.csv`;
     a.click();
 }
 
-setInterval(() => { if (!$("hours").hidden && !dlg.open && feat("attendance")) loadHours(); }, 60000);   // keeps the On site pills up to date
-$("f-emp").addEventListener("input", renderHours);
-$("f-failed").addEventListener("change", renderHours);
+setInterval(() => { if ($("hours") && !$("hours").hidden && dlg && !dlg.open && feat("attendance")) loadHours(); }, 60000);
+if ($("f-emp")) $("f-emp").addEventListener("input", renderHours);
+if ($("f-failed")) $("f-failed").addEventListener("change", renderHours);
 
-// ---------- Location picker (Leaflet + OpenStreetMap, free, no API key) ----------
+// ---------- Location picker (Leaflet + OpenStreetMap) ----------
 const pickdlg = $("pickdlg");
 let pickMap = null, pickMarker = null, pickCircle = null, picked = null;
-let RADIUS_M = 125;   // set from the Radius field each time the picker opens
+let RADIUS_M = 125;
 
 function setPick(lat, lng) {
     picked = { lat: lat, lng: lng };
@@ -328,27 +349,30 @@ function setPick(lat, lng) {
         pickMarker.setLatLng([lat, lng]);
         pickCircle.setLatLng([lat, lng]);
     }
-    $("p-info").innerText = `Selected: ${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+    if ($("p-info")) $("p-info").innerText = `Selected: ${lat.toFixed(6)}, ${lng.toFixed(6)}`;
 }
 
-// Radius slider + number box: the circle on the map follows as you change it
 function setRadius(v, fit) {
     v = Math.min(5000, Math.max(20, Math.round(Number(v) || 125)));
     RADIUS_M = v;
-    $("p-rad").value = Math.min(v, 2000);   // slider covers 20-2000m; the box accepts up to 5000m
-    $("p-radnum").value = v;
+    if ($("p-rad")) $("p-rad").value = Math.min(v, 2000);
+    if ($("p-radnum")) $("p-radnum").value = v;
     if (pickCircle) pickCircle.setRadius(v);
     if (fit) fitCircle();
 }
 
 function fitCircle() {
-    if (pickCircle) pickMap.fitBounds(pickCircle.getBounds(), { maxZoom: 18, padding: [20, 20] });
+    if (pickCircle && pickMap) pickMap.fitBounds(pickCircle.getBounds(), { maxZoom: 18, padding: [20, 20] });
 }
 
-$("p-rad").addEventListener("input", () => setRadius($("p-rad").value, false));
-$("p-rad").addEventListener("change", () => fitCircle());
-$("p-radnum").addEventListener("input", () => { if (Number($("p-radnum").value) >= 20) setRadius($("p-radnum").value, false); });
-$("p-radnum").addEventListener("change", () => setRadius($("p-radnum").value, true));
+if ($("p-rad")) {
+    $("p-rad").addEventListener("input", () => setRadius($("p-rad").value, false));
+    $("p-rad").addEventListener("change", () => fitCircle());
+}
+if ($("p-radnum")) {
+    $("p-radnum").addEventListener("input", () => { if (Number($("p-radnum").value) >= 20) setRadius($("p-radnum").value, false); });
+    $("p-radnum").addEventListener("change", () => setRadius($("p-radnum").value, true));
+}
 
 function openPicker() {
     if (typeof L === "undefined") return alert("The map couldn't load. Check your internet connection and refresh.");
@@ -356,10 +380,10 @@ function openPicker() {
     const radEl = $("df").querySelector('[data-i="4"]');
     setRadius(Number(radEl.value) || 125, false);
     const has = latEl.value.trim() !== "" && lngEl.value.trim() !== "" && isFinite(Number(latEl.value)) && isFinite(Number(lngEl.value));
-    $("p-q").value = "";
+    if ($("p-q")) $("p-q").value = "";
     pickdlg.showModal();
 
-    setTimeout(() => {   // wait for the dialog to be visible so the map gets its size
+    setTimeout(() => {
         if (!pickMap) {
             pickMap = L.map("pickmap");
             L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -376,45 +400,47 @@ function openPicker() {
             fitCircle();
         } else {
             pickMap.setView([52.5, -1.5], 6);
-            $("p-info").innerText = "Search above, or click the map to place the pin. Use the slider or box below to set the check-in radius (the blue circle).";
+            if ($("p-info")) $("p-info").innerText = "Search above, or click the map to place the pin. Use the slider or box below to set the check-in radius (the blue circle).";
         }
     }, 60);
 
-    $("p-use").onclick = () => {
-        if (!picked) { $("p-info").innerText = "Click the map to choose a spot first."; return; }
-        latEl.value = picked.lat.toFixed(6);
-        lngEl.value = picked.lng.toFixed(6);
-        radEl.value = String(RADIUS_M);
-        pickdlg.close();
-    };
+    if ($("p-use")) {
+        $("p-use").onclick = () => {
+            if (!picked) { if ($("p-info")) $("p-info").innerText = "Click the map to choose a spot first."; return; }
+            latEl.value = picked.lat.toFixed(6);
+            lngEl.value = picked.lng.toFixed(6);
+            radEl.value = String(RADIUS_M);
+            pickdlg.close();
+        };
+    }
 }
 
 async function pickSearch() {
-    const q = $("p-q").value.trim();
+    const q = ($("p-q")?.value || "").trim();
     if (!q) return;
-    $("p-info").innerText = "Searching...";
+    if ($("p-info")) $("p-info").innerText = "Searching...";
     try {
         const res = await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(q));
         const hits = await res.json();
-        if (!hits.length) { $("p-info").innerText = "Nothing found. Try a postcode or a fuller address."; return; }
+        if (!hits.length) { if ($("p-info")) $("p-info").innerText = "Nothing found. Try a postcode or a fuller address."; return; }
         const lat = Number(hits[0].lat), lng = Number(hits[0].lon);
         pickMap.setView([lat, lng], 17);
         setPick(lat, lng);
         fitCircle();
     } catch (err) {
-        $("p-info").innerText = "Search failed. Check your connection, or click the map instead.";
+        if ($("p-info")) $("p-info").innerText = "Search failed. Check your connection, or click the map instead.";
     }
 }
 
-$("p-q").addEventListener("keydown", (e) => { if (e.key === "Enter") pickSearch(); });
+if ($("p-q")) $("p-q").addEventListener("keydown", (e) => { if (e.key === "Enter") pickSearch(); });
 
 // ---------- Map pop-up ----------
 const mapdlg = $("mapdlg");
-mapdlg.addEventListener("close", () => { $("mf").src = "about:blank"; });
+if (mapdlg) mapdlg.addEventListener("close", () => { if ($("mf")) $("mf").src = "about:blank"; });
 
 function showMap(row, which) {
     const r = state.logs.find((x) => x.row === row);
-    if (!r) return;
+    if (!r || !mapdlg) return;
     const v = r.v, isIn = which === "in";
     const url = isIn ? v[8] : v[11], dist = isIn ? v[7] : v[10], when = isIn ? v[0] : v[9];
     const m = String(url).match(/maps\?q=(-?[\d.]+),(-?[\d.]+)/);
@@ -430,12 +456,13 @@ function showMap(row, which) {
 async function loadAttn() {
     const r = await api("attention");
     if (r.status !== "SUCCESS") return;
-    state.attn = r.rows.reverse();   // newest first
-    $("attn-badge").innerText = state.attn.length ? ` (${state.attn.length})` : "";
+    state.attn = (r.rows || []).reverse();
+    if ($("attn-badge")) $("attn-badge").innerText = state.attn.length ? ` (${state.attn.length})` : "";
     renderAttn();
 }
 
 function renderAttn() {
+    if (!$("t-attn")) return;
     $("t-attn").innerHTML = state.attn.length
         ? "<tr><th>Employee</th><th>Site</th><th>In</th><th>Out</th><th>Issue</th><th></th></tr>" +
           state.attn.map((r) => {
@@ -471,18 +498,19 @@ function openAddShift() {
     dlg.showModal();
 }
 
-// ---------- Onboarding email (opens a ready-to-send draft in Outlook; nothing is sent automatically) ----------
-const ONBOARD_SUBJECT = "Welcome to the " + CO_SHORT + " Site Portal";
+// ---------- Onboarding email ----------
+const ONBOARD_SUBJECT = "Welcome to the " + (window.CO_SHORT || "Site") + " Site Portal";
 
 function onboardBody(u, withPin) {
+    const coShort = window.CO_SHORT || "Site";
     const role = u.v[3];
     const does = role === "QA" ? "complete quality assurance inspections"
         : role === "Contractor/QA" ? "check in and out of site, complete quality assurance inspections, and view your hours"
         : "check in and out of site and view your hours" + (u.v[12] !== "Off" ? " and create invoices" : "");
     const appUrl = location.origin + location.pathname.replace(/[^/]*$/, "");
-    return `Hi ${u.v[0].split(" ")[0]},
+    return `Hi ${String(u.v[0] || "").split(" ")[0]},
 
-You've been set up on the ${CO_SHORT} Site Portal. You'll use it to ${does}.
+You've been set up on the ${coShort} Site Portal. You'll use it to ${does}.
 
 Open it here: ${appUrl}
 
@@ -524,8 +552,8 @@ function sendOnboard(row, how) {
 
 // ---------- Generate an unused PIN ----------
 function genPin() {
-    const len = $("r-admin").checked ? 6 : 4;   // admins need 6+ digits
-    const used = new Set(state.Users.map((r) => r.v[1].padStart(4, "0")));
+    const len = $("r-admin").checked ? 6 : 4;
+    const used = new Set(state.Users.map((r) => String(r.v[1] || "").padStart(4, "0")));
     let p;
     do {
         p = String(Math.floor(crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296 * 10 ** len)).padStart(len, "0");
@@ -587,9 +615,9 @@ function openUserEdit(row) {
 
 // ---------- Invoices ----------
 async function loadInv() {
-    const r = await api("invList", { from: $("inv-from").value, to: $("inv-to").value });
+    const r = await api("invList", { from: $("inv-from")?.value || "", to: $("inv-to")?.value || "" });
     if (r.status !== "SUCCESS") return alert(r.reason);
-    state.inv = r.rows.reverse();   // newest first
+    state.inv = (r.rows || []).reverse();
     renderInv();
     stamp();
 }
@@ -597,8 +625,9 @@ async function loadInv() {
 function invDays(v) { try { return JSON.parse(v[8]); } catch (err) { return []; } }
 
 function renderInv() {
-    const q = $("inv-search").value.trim().toLowerCase();
-    const rows = (state.inv || []).filter((r) => !q || r.v[2].toLowerCase().includes(q));
+    if (!$("t-inv")) return;
+    const q = ($("inv-search")?.value || "").trim().toLowerCase();
+    const rows = (state.inv || []).filter((r) => !q || String(r.v[2] || "").toLowerCase().includes(q));
     $("t-inv").innerHTML = "<tr><th>Invoice</th><th>Submitted</th><th>Contractor</th><th>Period</th><th>Hours</th><th>Total</th><th>Daily breakdown</th><th></th></tr>" +
         rows.map((r) => {
             const v = r.v;
@@ -632,7 +661,7 @@ function viewInv(row) {
     openView(`Invoice ${inv.id}: ${inv.contractor}`, invoiceHtml(inv));
 }
 
-$("inv-search").addEventListener("input", renderInv);
+if ($("inv-search")) $("inv-search").addEventListener("input", renderInv);
 
 // ---------- QA checklist ----------
 const QA_REPORTS = ["Windows", "Doors", "Curtain Walling"];
@@ -643,11 +672,12 @@ const QA_PHOTO_DEFAULT = { PASSFAIL: ["PASS", "FAIL"], ACCEPT: ["ACCEPT", "DECLI
 async function loadQq() {
     const r = await api("qList");
     if (r.status !== "SUCCESS") return alert(r.reason);
-    state.qq = r.rows;
+    state.qq = r.rows || [];
     renderQq();
 }
 
 function renderQq() {
+    if (!$("t-qq") || !$("qq-report")) return;
     const rep = $("qq-report").value;
     const list = (state.qq || []).filter((r) => r.v[4] === rep), n = list.length;
     const photoText = (p) => p === "NONE" ? "None" : p.split(",").map((x) => x === "TEXT" ? "Answer" : x.charAt(0) + x.slice(1).toLowerCase()).join(", ");
@@ -661,7 +691,7 @@ function renderQq() {
          || "<tr><td colspan='7'>No questions for this report yet.</td></tr>");
 }
 
-$("qq-report").addEventListener("change", renderQq);
+if ($("qq-report")) $("qq-report").addEventListener("change", renderQq);
 
 function openQq(row) {
     const cur = state.qq.find((r) => r.row === row);
@@ -669,10 +699,10 @@ function openQq(row) {
     $("dt").innerText = row ? "Edit question" : "Add question";
     $("de").innerText = "";
     $("df").innerHTML =
-        `<label class="field">Report<select id="q-report">${QA_REPORTS.map((o) => `<option${o === v[4] ? " selected" : ""}>${esc(o)}</option>`).join("")}</select></label>` +
+        `<label class="field">Report<select id="q-report">${QA_REPORTS.map((o) => `<option${o === v[4] ? " selected" : ""}>${o}</option>`).join("")}</select></label>` +
         `<label class="field">Question *<input id="q-title" maxlength="80" value="${esc(v[1])}"></label>` +
         `<label class="field">Description / what to check<textarea id="q-desc" rows="2" maxlength="200">${esc(v[2])}</textarea></label>` +
-        `<label class="field">Answer type<select id="q-type">${Object.keys(QA_TYPES).map((k) => `<option value="${k}"${k === v[5] ? " selected" : ""}>${esc(QA_TYPES[k])}</option>`).join("")}</select></label>` +
+        `<label class="field">Answer type<select id="q-type">${Object.keys(QA_TYPES).map((k) => `<option value="${k}"${k === v[5] ? " selected" : ""}>${QA_TYPES[k]}</option>`).join("")}</select></label>` +
         `<label class="switch"><input type="checkbox" id="q-mand"${v[6] !== "No" ? " checked" : ""}> Mandatory <small>must be answered before submitting</small></label>` +
         `<div class="field">Photo required on<div id="q-photo"></div></div>` +
         `<label class="field">Status<select id="q-status"><option${v[3] !== "Inactive" ? " selected" : ""}>Active</option><option${v[3] === "Inactive" ? " selected" : ""}>Inactive</option></select></label>` +
@@ -680,7 +710,7 @@ function openQq(row) {
 
     const drawPhoto = (type, selected) => {
         $("q-photo").innerHTML = QA_PHOTO_OPTS[type].map((o) =>
-            `<label class="switch"><input type="checkbox" data-p="${o[0]}"${selected.indexOf(o[0]) >= 0 ? " checked" : ""}> ${esc(o[1])}</label>`).join("") +
+            `<label class="switch"><input type="checkbox" data-p="${o[0]}"${selected.indexOf(o[0]) >= 0 ? " checked" : ""}> ${o[1]}</label>`).join("") +
             `<label class="switch"><input type="checkbox" data-p="NONE"${selected.length ? "" : " checked"}> No photo required</label>`;
     };
     drawPhoto(v[5], v[7] === "NONE" ? [] : v[7].split(","));
@@ -724,21 +754,22 @@ async function moveQq(row, dir) {
 const photodlg = $("photodlg");
 
 async function loadQa() {
-    const r = await api("qaList", { from: $("qa-from").value, to: $("qa-to").value });
+    const r = await api("qaList", { from: $("qa-from")?.value || "", to: $("qa-to")?.value || "" });
     if (r.status !== "SUCCESS") return alert(r.reason);
-    state.qa = r.rows.reverse();   // newest first
+    state.qa = (r.rows || []).reverse();
     renderQa();
     stamp();
 }
 
 function renderQa() {
-    const q = $("qa-search").value.trim().toLowerCase(), onlyFail = $("qa-fails").checked;
+    if (!$("t-qa")) return;
+    const q = ($("qa-search")?.value || "").trim().toLowerCase(), onlyFail = $("qa-fails")?.checked || false;
     const rows = (state.qa || []).filter((r) =>
         (!onlyFail || r.v[4] === "FAIL") && (!q || (r.v[1] + " " + r.v[2] + " " + r.v[3] + " " + (r.v[13] || "")).toLowerCase().includes(q)));
     $("t-qa").innerHTML = "<tr><th>Date</th><th>Inspector</th><th>Site</th><th>Type</th><th>Overall</th><th>Checks</th><th>Photos</th><th></th></tr>" +
         rows.map((r) => {
             const v = r.v;
-            const checks = v[5].split("\n").map((l) => `<div class="${/: (FAIL|DECLINE)\b/.test(l) ? "failtxt" : ""}">${esc(l)}</div>`).join("");
+            const checks = String(v[5] || "").split("\n").map((l) => `<div class="${/: (FAIL|DECLINE)\b/.test(l) ? "failtxt" : ""}">${esc(l)}</div>`).join("");
             return `<tr><td>${esc(dmy(v[0]))}</td><td>${esc(v[1])}</td><td>${esc(v[3] || v[2])}</td><td>${esc(v[8] || "Windows")}${v[13] ? `<br><small>${esc(v[13])}${v[17] === "Yes" ? " (ad hoc)" : ""}</small>` : ""}</td>` +
                    `<td class="${v[4] === "FAIL" ? "failtxt" : "oktxt"}"><b>${esc(v[4])}</b></td><td>${checks}</td>` +
                    `<td>${v[6] ? `<button class="small" onclick="showPhotos(${r.row})">Photos (${v[6]})</button>` : "-"}</td>` +
@@ -748,32 +779,30 @@ function renderQa() {
         }).join("");
 }
 
-// Branded one-page report for a QA inspection. "Save as PDF" in the print box to download it.
 function qaReportHtml(v, media, note, autoPrint) {
-    const logo = new URL(LOGO_FILE, location.href).href;
-    const checkRows = v[5].split("\n").map((l, i) => {
+    const co = window.CO || "SiteOpSync";
+    const logo = new URL(window.LOGO_FILE || "company logo1.png", location.href).href;
+    const checkRows = String(v[5] || "").split("\n").map((l, i) => {
         const m = l.match(/^(.*?): (PASS|FAIL|N\/A|ACCEPT|DECLINE|TEXT)(?: - (.*))?$/) || [null, l, "", ""];
         const cls = (m[2] === "PASS" || m[2] === "ACCEPT") ? "pass" : (m[2] === "FAIL" || m[2] === "DECLINE") ? "fail" : "na";
-        const shots = (media.checks[i] || []).map((p, n) => `<img src="${p}" alt="Photo ${n + 1}">`).join("");
+        const shots = ((media.checks && media.checks[i]) || []).map((p, n) => `<img src="${p}" alt="Photo ${n + 1}">`).join("");
         return `<tr><td>${invEsc(m[1])}</td><td class="res ${cls}">${m[2] === "TEXT" ? "-" : m[2]}</td><td>${invEsc(m[3] || "")}</td></tr>` +
                (shots ? `<tr class="pics"><td colspan="3">${shots}</td></tr>` : "");
     }).join("");
-    // Photo appendix: every photo at full width, captioned with its question and answer
     const items = [];
-    v[5].split("\n").forEach((l, i) => {
+    String(v[5] || "").split("\n").forEach((l, i) => {
         const m = l.match(/^(.*?): (PASS|FAIL|N\/A|ACCEPT|DECLINE|TEXT)(?: - (.*))?$/) || [null, l, "", ""];
-        (media.checks[i] || []).forEach((p, n) => items.push({ p: p, cap: `${i + 1}. ${m[1]}${m[2] && m[2] !== "TEXT" ? " (" + m[2] + ")" : ""} - photo ${n + 1}` }));
+        ((media.checks && media.checks[i]) || []).forEach((p, n) => items.push({ p: p, cap: `${i + 1}. ${m[1]}${m[2] && m[2] !== "TEXT" ? " (" + m[2] + ")" : ""} - photo ${n + 1}` }));
     });
-    media.general.forEach((p, i) => items.push({ p: p, cap: `Additional photo ${i + 1}` }));
+    (media.general || []).forEach((p, i) => items.push({ p: p, cap: `Additional photo ${i + 1}` }));
     const appendix = items.map((x) => `<figure><img src="${x.p}" alt="${invEsc(x.cap)}"><figcaption>${invEsc(x.cap)}</figcaption></figure>`).join("");
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>QA report - ${invEsc(v[3] || v[2])} - ${invEsc(invDmy(v[0]).slice(0, 10))}</title>
+    return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>QA report - ${invEsc(v[3] || v[2])} - ${invEsc(invDmy(v[0]).slice(0, 10))}</title>
 <style>
 @page { margin: 14mm; }
 body { font-family: Arial, sans-serif; color: #111; font-size: 11pt; }
 .head { display: flex; justify-content: space-between; align-items: center; border-bottom: 4px solid #0284c7; padding-bottom: 12px; }
 .head img { height: 58px; }
 .head h1 { font-size: 17pt; margin: 0; text-align: right; color: #0f172a; }
-.head small { display: block; color: #555; font-size: 9pt; text-align: right; }
 .meta { width: 100%; border-collapse: collapse; margin-top: 18px; }
 .meta td { padding: 6px 8px; border-bottom: 1px solid #ddd; }
 .meta td:first-child { width: 28%; color: #555; font-weight: bold; }
@@ -793,19 +822,18 @@ h2.appx { page-break-before: always; }
 .appendix figcaption { font-size: 10pt; color: #333; margin-top: 4px; font-weight: bold; }
 .foot { margin-top: 26px; border-top: 1px solid #ccc; padding-top: 6px; font-size: 8.5pt; color: #666; }
 </style></head><body>
-<div class="head"><img src="${logo}" alt="${invEsc(CO)}"><div><h1>Quality Assurance<br>Inspection Report</h1></div></div>
+<div class="head"><img src="${logo}" alt="${invEsc(co)}"><div><h1>Quality Assurance<br>Inspection Report</h1></div></div>
 <table class="meta">
 <tr><td>Project / site</td><td>${invEsc(v[3] || v[2])}</td></tr>
-${v[10] ? `<tr><td>Project number</td><td>${invEsc(v[10])}</td></tr>
-` : ""}${v[12] ? `<tr><td>Address</td><td>${invEsc(v[12])}</td></tr>
-` : ""}${v[9] ? `<tr><td>Main contractor</td><td>${invEsc(v[9])}</td></tr>
-` : ""}${v[11] ? `<tr><td>Installer</td><td>${invEsc(v[11])}</td></tr>
-` : ""}<tr><td>Report type</td><td>${invEsc(v[8] || "Windows")}</td></tr>
-${v[13] ? `<tr><td>Installation reference</td><td>${invEsc(v[13])}${v[17] === "Yes" ? " (ad hoc)" : ""}</td></tr>
-` : ""}${v[14] ? `<tr><td>Phase</td><td>${invEsc(v[14])}</td></tr>
-` : ""}${v[15] ? `<tr><td>Elevation / level</td><td>${invEsc(v[15])}</td></tr>
-` : ""}${v[16] ? `<tr><td>Drawings</td><td>${invEsc(v[16])}</td></tr>
-` : ""}
+${v[10] ? `<tr><td>Project number</td><td>${invEsc(v[10])}</td></tr>` : ""}
+${v[12] ? `<tr><td>Address</td><td>${invEsc(v[12])}</td></tr>` : ""}
+${v[9] ? `<tr><td>Main contractor</td><td>${invEsc(v[9])}</td></tr>` : ""}
+${v[11] ? `<tr><td>Installer</td><td>${invEsc(v[11])}</td></tr>` : ""}
+<tr><td>Report type</td><td>${invEsc(v[8] || "Windows")}</td></tr>
+${v[13] ? `<tr><td>Installation reference</td><td>${invEsc(v[13])}${v[17] === "Yes" ? " (ad hoc)" : ""}</td></tr>` : ""}
+${v[14] ? `<tr><td>Phase</td><td>${invEsc(v[14])}</td></tr>` : ""}
+${v[15] ? `<tr><td>Elevation / level</td><td>${invEsc(v[15])}</td></tr>` : ""}
+${v[16] ? `<tr><td>Drawings</td><td>${invEsc(v[16])}</td></tr>` : ""}
 <tr><td>Inspector</td><td>${invEsc(v[1])}</td></tr>
 <tr><td>Date and time</td><td>${invEsc(invDmy(v[0]))}</td></tr>
 <tr><td>Overall result</td><td><span class="overall ${invEsc(v[4])}">${invEsc(v[4])}</span></td></tr>
@@ -815,11 +843,9 @@ ${v[13] ? `<tr><td>Installation reference</td><td>${invEsc(v[13])}${v[17] === "Y
 ${v[7] ? `<h2>Additional information</h2><p>${invMulti(v[7])}</p>` : ""}
 ${appendix ? `<h2 class="appx">Appendix: photographs</h2><div class="appendix">${appendix}</div>` : ""}
 ${note ? `<p style="color:#b45309">${invEsc(note)}</p>` : ""}
-<div class="foot">Generated ${new Date().toLocaleString("en-GB")} | ${invEsc(CO)} | Confidential</div>
+<div class="foot">Generated ${new Date().toLocaleString("en-GB")} | ${invEsc(co)} | Confidential</div>
 ${autoPrint ? "<script>window.onload = function () { setTimeout(function () { window.print(); }, 300); };<\/script>" : ""}
 </body></html>`;
-
-    return html;
 }
 
 function printQaReport(v, media, w, note) {
@@ -828,11 +854,11 @@ function printQaReport(v, media, w, note) {
     w.document.close();
 }
 
-// ---------- View a document in a pop-up (with a Download PDF button) ----------
 const viewdlg = $("viewdlg");
-viewdlg.addEventListener("close", () => { $("vw-frame").srcdoc = ""; });
+if (viewdlg) viewdlg.addEventListener("close", () => { if ($("vw-frame")) $("vw-frame").srcdoc = ""; });
 
 function openView(title, html) {
+    if (!viewdlg) return;
     $("vw-title").innerText = title;
     $("vw-frame").srcdoc = html;
     viewdlg.showModal();
@@ -840,6 +866,7 @@ function openView(title, html) {
 
 function printView() {
     const f = $("vw-frame");
+    if (!f || !f.contentWindow) return;
     f.contentWindow.focus();
     f.contentWindow.print();
 }
@@ -853,12 +880,12 @@ async function viewQa(row, vOverride) {
         if (r.status === "SUCCESS") media = { general: r.photos || [], checks: r.checkPhotos || [] };
         else note = "The photos could not be loaded: " + r.reason;
     }
-    $("vw-frame").srcdoc = qaReportHtml(v, media, note, false);
+    if ($("vw-frame")) $("vw-frame").srcdoc = qaReportHtml(v, media, note, false);
 }
 
 async function pdfQa(row) {
     const v = state.qa.find((x) => x.row === row).v;
-    const w = window.open("", "_blank");   // opened straight away so the pop-up blocker allows it
+    const w = window.open("", "_blank");
     if (!w) { alert("Please allow pop-ups for this site to download the report."); return; }
     w.document.write("<p style='font-family:Arial'>Preparing report...</p>");
     let media = { general: [], checks: [] }, note = "";
@@ -889,9 +916,10 @@ async function delQaPhotos(row) {
 let phList = [], phIdx = 0;
 
 function phShow(i) {
+    if (!phList.length) return;
     phIdx = (i + phList.length) % phList.length;
-    $("ph-main").src = phList[phIdx];
-    $("ph-count").innerText = `Photo ${phIdx + 1} of ${phList.length}`;
+    if ($("ph-main")) $("ph-main").src = phList[phIdx];
+    if ($("ph-count")) $("ph-count").innerText = `Photo ${phIdx + 1} of ${phList.length}`;
     document.querySelectorAll("#ph-thumbs img").forEach((t, n) => t.classList.toggle("on", n === phIdx));
     document.querySelectorAll(".ph-nav").forEach((b) => { b.hidden = phList.length < 2; });
 }
@@ -899,6 +927,7 @@ function phShow(i) {
 function phStep(n) { phShow(phIdx + n); }
 
 async function showPhotos(row) {
+    if (!photodlg) return;
     const rep = state.qa.find((x) => x.row === row);
     $("ph-title").innerText = `${rep.v[1]}: ${rep.v[3] || rep.v[2]} (${dmy(rep.v[0])})`;
     $("ph-main").removeAttribute("src");
@@ -913,21 +942,23 @@ async function showPhotos(row) {
 }
 
 document.addEventListener("keydown", (e) => {
-    if (!photodlg.open || !phList.length) return;
+    if (!photodlg || !photodlg.open || !phList.length) return;
     if (e.key === "ArrowRight") phStep(1);
     if (e.key === "ArrowLeft") phStep(-1);
 });
 
-$("qa-search").addEventListener("input", renderQa);
-$("qa-fails").addEventListener("change", renderQa);
+if ($("qa-search")) $("qa-search").addEventListener("input", renderQa);
+if ($("qa-fails")) $("qa-fails").addEventListener("change", renderQa);
 
 // ---------- QR codes ----------
 const logoImg = new Image();
 logoImg.onload = drawQr;
-logoImg.src = encodeURI(LOGO_FILE);   // same file as the page logo
+logoImg.src = encodeURI(window.LOGO_FILE || "company logo1.png");
 
 function fillQrSites() {
-    const sel = $("q-site"), keep = sel.value;
+    const sel = $("q-site");
+    if (!sel) return;
+    const keep = sel.value;
     sel.innerHTML = state.Sites.map((r) =>
         `<option value="${esc(r.v[0])}">${esc(r.v[1] || r.v[0])}${r.v[5] === "Inactive" ? " - inactive" : ""}</option>`).join("");
     if (keep) sel.value = keep;
@@ -951,17 +982,19 @@ function drawEye(ctx, x, y, cell) {
     ctx.fillStyle = "#000"; roundRect(ctx, x + 2 * cell, y + 2 * cell, s - 4 * cell, s - 4 * cell, cell * 0.9); ctx.fill();
 }
 
-function qrText() { return $("q-site").value; }
+function qrText() { return $("q-site") ? $("q-site").value : ""; }
 
 function drawQr() {
-    const c = $("q-canvas"), ctx = c.getContext("2d"), text = qrText();
+    const c = $("q-canvas");
+    if (!c) return;
+    const ctx = c.getContext("2d"), text = qrText();
     if (typeof qrcode === "undefined" || !text) return;
 
     const site = state.Sites.find((r) => r.v[0] === text);
-    const label = $("q-label").checked && site;
+    const label = $("q-label")?.checked && site;
     const size = 800, pad = 40;
 
-    const qr = qrcode(0, "H");          // "H" = highest error correction, so the logo can cover the middle
+    const qr = qrcode(0, "H");
     qr.addData(text);
     qr.make();
     const n = qr.getModuleCount(), cell = (size - pad * 2) / n;
@@ -999,32 +1032,35 @@ function drawQr() {
 
 function downloadQr() {
     const text = qrText();
-    if (!text) return;
+    if (!text || !$("q-canvas")) return;
     const a = document.createElement("a");
     a.href = $("q-canvas").toDataURL("image/png");
     a.download = "QR-" + text.replace(/[^\w-]+/g, "_") + ".png";
     a.click();
 }
 
-["q-site", "q-label"].forEach((id) => $(id).addEventListener("input", drawQr));
+["q-site", "q-label"].forEach((id) => { if ($(id)) $(id).addEventListener("input", drawQr); });
 
-// ---------- Installations (the items to inspect on each project, set up by the office) ----------
+// ---------- Installations ----------
 async function loadInst() {
     const r = await api("iList");
     if (r.status !== "SUCCESS") return;
-    state.inst = r.rows;
+    state.inst = r.rows || [];
     renderInst();
-    if (state.Sites.length) renderTable("Sites");   // refreshes the counts on the project cards
+    if (state.Sites.length) renderTable("Sites");
 }
 
 function fillInstSites() {
-    const sel = $("inst-site"), keep = sel.value;
+    const sel = $("inst-site");
+    if (!sel) return;
+    const keep = sel.value;
     sel.innerHTML = state.Sites.map((r) => `<option value="${esc(r.v[0])}">${esc(r.v[1] || r.v[0])}</option>`).join("");
     if (keep) sel.value = keep;
     renderInst();
 }
 
 function renderInst() {
+    if (!$("t-inst") || !$("inst-site")) return;
     const site = $("inst-site").value;
     const list = (state.inst || []).filter((r) => r.v[1] === site);
     const su = paySetupOf((state.Sites.find((s) => s.v[0] === site) || { v: [] }).v);
@@ -1039,25 +1075,25 @@ function renderInst() {
         }).join("") || "<tr><td colspan='11'>No installations for this project yet.</td></tr>");
 }
 
-$("inst-site").addEventListener("change", renderInst);
+if ($("inst-site")) $("inst-site").addEventListener("change", renderInst);
 
 function showInstalls(row) {
     const s = state.Sites.find((r) => r.row === row);
     if (!s) return;
-    $("inst-site").value = s.v[0];
+    if ($("inst-site")) $("inst-site").value = s.v[0];
     renderInst();
-    document.querySelector('nav button[data-tab="installs"]').click();
+    activateTab("installs");
 }
 
 function openInst(row, dup) {
     const cur = (state.inst || []).find((r) => r.row === row);
-    const v = cur ? cur.v : ["", $("inst-site").value, "Windows", "", "", "", "", "Active", "", "", ""];
+    const v = cur ? cur.v : ["", $("inst-site")?.value || "", "Windows", "", "", "", "", "Active", "", "", ""];
     const editing = !!cur && !dup;
     $("dt").innerText = editing ? "Edit installation" : "Add installation";
     $("de").innerText = "";
     $("df").innerHTML =
         `<label class="field">Project<select id="i-site">${state.Sites.map((r) => `<option value="${esc(r.v[0])}"${r.v[0] === v[1] ? " selected" : ""}>${esc(r.v[1] || r.v[0])}</option>`).join("")}</select></label>` +
-        `<label class="field">Product<select id="i-prod">${QA_REPORTS.map((o) => `<option${o === v[2] ? " selected" : ""}>${esc(o)}</option>`).join("")}</select></label>` +
+        `<label class="field">Product<select id="i-prod">${QA_REPORTS.map((o) => `<option${o === v[2] ? " selected" : ""}>${o}</option>`).join("")}</select></label>` +
         `<label class="field">Reference *<input id="i-ref" maxlength="80" placeholder="e.g. Type P.1" value="${esc(v[3])}"></label>` +
         `<div class="two"><label class="field">Phase<input id="i-phase" maxlength="40" value="${esc(v[4])}"></label><label class="field">Elevation / level<input id="i-level" maxlength="60" value="${esc(v[5])}"></label></div>` +
         `<label class="field">Drawings<textarea id="i-draw" rows="2" maxlength="200" placeholder="e.g. 4404, 4403, 5402, EL-2402, SP-0401">${esc(v[6])}</textarea></label>` +
@@ -1070,7 +1106,7 @@ function openInst(row, dup) {
                                        ref: $("i-ref").value, phase: $("i-phase").value, level: $("i-level").value, drawings: $("i-draw").value, status: $("i-status").value,
                                        lenMm: $("i-len").value, hgtMm: $("i-hgt").value, override: $("i-ovr").value });
         if (r.status !== "SUCCESS") { $("de").innerText = r.reason; return; }
-        $("inst-site").value = $("i-site").value;
+        if ($("inst-site")) $("inst-site").value = $("i-site").value;
         dlg.close();
         loadInst();
     };
@@ -1085,12 +1121,12 @@ async function delInst(row) {
     loadInst();
 }
 
-// ---------- Project overview: progress from the QA reports ----------
+// ---------- Project overview ----------
 const projdlg = $("projdlg");
 
 async function viewProject(row) {
     const s = state.Sites.find((r) => r.row === row);
-    if (!s) return;
+    if (!s || !projdlg) return;
     const sv = s.v;
     $("pj-title").innerText = sv[1] || sv[0];
     $("pj-body").innerHTML = "<p class='note'>Loading overview...</p>";
@@ -1099,10 +1135,10 @@ async function viewProject(row) {
     if (r.status !== "SUCCESS") { $("pj-body").innerHTML = `<p class="err">${esc(r.reason)}</p>`; return; }
 
     state.ov = {};
-    r.installs.forEach((i) => { if (i.last) state.ov[i.last.row] = i.last.v; });
-    r.other.forEach((o) => { state.ov[o.row] = o.v; });
+    (r.installs || []).forEach((i) => { if (i.last) state.ov[i.last.row] = i.last.v; });
+    (r.other || []).forEach((o) => { state.ov[o.row] = o.v; });
 
-    const act = r.installs.filter((i) => i.active), done = act.filter((i) => i.last);
+    const act = (r.installs || []).filter((i) => i.active), done = act.filter((i) => i.last);
     const pass = done.filter((i) => i.last.v[4] === "PASS").length, fail = done.length - pass;
     const pc = (n) => act.length ? Math.round(n / act.length * 100) : 0;
     const meta = (l, x) => x ? `<div><span>${l}: </span>${esc(x)}</div>` : "";
@@ -1112,12 +1148,12 @@ async function viewProject(row) {
         return a.length ? `<span class="chip">${esc(p)}: <b>${a.filter((i) => i.last).length} / ${a.length}</b></span>` : "";
     }).join("");
 
-    const instRows = r.installs.map((i) =>
+    const instRows = (r.installs || []).map((i) =>
         `<tr${i.active ? "" : ' style="opacity:.5"'}><td>${esc(i.product)}</td><td><b>${esc(i.ref)}</b>${i.active ? "" : " (inactive)"}</td><td>${esc(i.phase)}</td><td>${esc(i.level)}</td>` +
         `<td>${pill(i)}</td><td>${i.last ? esc(dmy(i.last.v[0])) + "<br><small>" + esc(i.last.v[1]) + "</small>" : "-"}</td><td>${i.count}</td>` +
         `<td class="act">${i.last ? `<button class="small" onclick="viewQa(${i.last.row}, state.ov[${i.last.row}])">View report</button>` : ""}</td></tr>`).join("");
 
-    const otherRows = r.other.map((o) => {
+    const otherRows = (r.other || []).map((o) => {
         const v = o.v;
         return `<tr><td>${esc(dmy(v[0]))}</td><td>${esc(v[8] || "Windows")}</td><td>${esc(v[13] || "-")}${v[17] === "Yes" ? " (ad hoc)" : ""}</td><td>${esc(v[1])}</td>` +
                `<td class="${v[4] === "FAIL" ? "failtxt" : "oktxt"}"><b>${esc(v[4])}</b></td><td class="act"><button class="small" onclick="viewQa(${o.row}, state.ov[${o.row}])">View report</button></td></tr>`;
@@ -1136,7 +1172,7 @@ async function viewProject(row) {
                      `<div class="scroll"><table><tr><th>Date</th><th>Type</th><th>Reference</th><th>Inspector</th><th>Overall</th><th></th></tr>${otherRows}</table></div>` : "");
 }
 
-// ---------- Payment stages, rates and ticking stages ----------
+// ---------- Payment stages & rates ----------
 function paySetupOf(v) {
     try {
         const p = JSON.parse(v[10] || "");
@@ -1144,7 +1180,6 @@ function paySetupOf(v) {
     } catch (err) { return null; }
 }
 
-// Splits a price across the stages in pence; the last stage takes any rounding left over
 function stageAmounts(price, stages) {
     const total = Math.round(price * 100);
     let left = total;
@@ -1155,9 +1190,9 @@ function stageAmounts(price, stages) {
     });
 }
 
-let payState = null;   // { row, stages, rates } while the Stages & rates window is open
+let payState = null;
 
-function payRead() {   // copy what has been typed back into payState
+function payRead() {
     document.querySelectorAll("#df [data-n]").forEach((el) => { payState.stages[el.dataset.n].name = el.value; });
     document.querySelectorAll("#df [data-p]").forEach((el) => { payState.stages[el.dataset.p].pct = el.value; });
     document.querySelectorAll("#df [data-r]").forEach((el) => { payState.rates[el.dataset.r] = el.value; });
@@ -1199,7 +1234,7 @@ function openPay(row) {
         const t = payTotal(), el = $("pay-total");
         if (el) { el.innerText = `Total ${t}%`; el.className = Math.abs(t - 100) < 0.005 ? "oktxt" : "failtxt"; }
     };
-    dlgCleanup = null;
+    dlg.addEventListener("close", () => { $("df").oninput = null; }, { once: true });
     $("ds").onclick = async () => {
         payRead();
         const stages = payState.stages.filter((x) => String(x.name).trim()).map((x) => ({ id: x.id, name: x.name, pct: Number(x.pct) }));
@@ -1215,7 +1250,6 @@ function openPay(row) {
     dlg.showModal();
 }
 
-// Admin can tick or untick stages for an installation (inspectors do it from the phone)
 function openStages(row) {
     const r0 = state.inst.find((x) => x.row === row);
     const su = paySetupOf((state.Sites.find((s) => s.v[0] === r0.v[1]) || { v: [] }).v);
@@ -1240,7 +1274,7 @@ function openStages(row) {
     };
     $("ds").innerText = "Close";
     $("ds").onclick = () => dlg.close();
-    dlgCleanup = () => loadInst();
+    dlg.addEventListener("close", () => { $("df").onchange = null; loadInst(); }, { once: true });
     dlg.showModal();
 }
 
@@ -1248,7 +1282,9 @@ function openStages(row) {
 let appData = null;
 
 function fillAppSites() {
-    const sel = $("app-site"), keep = sel.value;
+    const sel = $("app-site");
+    if (!sel) return;
+    const keep = sel.value;
     sel.innerHTML = state.Sites.map((r) => `<option value="${esc(r.v[0])}">${esc(r.v[1] || r.v[0])}</option>`).join("");
     if (keep) sel.value = keep;
 }
@@ -1256,48 +1292,52 @@ function fillAppSites() {
 function showApps(row) {
     const s = state.Sites.find((r) => r.row === row);
     if (!s) return;
-    $("app-site").value = s.v[0];
-    document.querySelector('nav button[data-tab="applications"]').click();
+    if ($("app-site")) $("app-site").value = s.v[0];
+    activateTab("applications");
 }
 
 async function loadApps() {
-    const site = $("app-site").value;
-    if (!site) { $("app-list").innerHTML = ""; return; }
-    $("app-list").innerHTML = "<p class='note'>Loading...</p>";
+    const site = $("app-site")?.value || "";
+    if (!site) { if ($("app-list")) $("app-list").innerHTML = ""; return; }
+    if ($("app-list")) $("app-list").innerHTML = "<p class='note'>Loading...</p>";
     const r = await api("appList", { siteId: site });
-    if (r.status !== "SUCCESS") { $("app-list").innerHTML = `<p class="err">${esc(r.reason)}</p>`; return; }
+    if (r.status !== "SUCCESS") { if ($("app-list")) $("app-list").innerHTML = `<p class="err">${esc(r.reason)}</p>`; return; }
     appData = r;
     renderApps();
 }
 
-$("app-site").addEventListener("change", loadApps);
+if ($("app-site")) $("app-site").addEventListener("change", loadApps);
 
 function renderApps() {
     const r = appData;
+    if (!r || !$("app-list")) return;
     if (!r.hasSetup) {
-        $("app-summary").innerHTML = "";
-        $("app-gen").disabled = true;
-        $("app-gen").innerText = "Generate application";
-        $("app-invoices").innerHTML = "";
+        if ($("app-summary")) $("app-summary").innerHTML = "";
+        if ($("app-gen")) { $("app-gen").disabled = true; $("app-gen").innerText = "Generate application"; }
+        if ($("app-invoices")) $("app-invoices").innerHTML = "";
         $("app-list").innerHTML = "<p class='note'>Set up this project's payment stages and rates first (Projects tab, Stages &amp; rates), then tick stages on the Progress page.</p>";
         return;
     }
     let agreed = 0, waiting = 0;
-    const invoiced = r.invoices.filter((i) => i.status !== "Cancelled").reduce((t, i) => t + i.net, 0);
-    r.apps.forEach((a) => a.lines.forEach((l) => { if (l.agreed === "Yes") agreed += l.amount; else if (l.agreed === "") waiting += l.amount; }));
-    $("app-summary").innerHTML =
-        `<span class="chip">Contract value: <b>${invMoney(r.contract)}</b></span><span class="chip">Agreed to date: <b>${invMoney(agreed)}</b></span>` +
-        `<span class="chip">Awaiting response: <b>${invMoney(waiting)}</b></span><span class="chip">Invoiced (net): <b>${invMoney(invoiced)}</b></span><span class="chip">Ready to apply for: <b>${invMoney(r.next.total)}</b></span>` +
-        (r.next.carried ? `<span class="chip">Carried forward: <b>${r.next.carried}</b> stage${r.next.carried === 1 ? "" : "s"}</span>` : "") +
-        (r.next.skipped.length ? `<span class="chip failtxt">${r.next.skipped.length} ticked stage${r.next.skipped.length === 1 ? "" : "s"} with no price</span>` : "");
-    $("app-gen").disabled = !r.next.count;
-    $("app-gen").innerText = r.next.count ? `Generate application (${r.next.count} stage${r.next.count === 1 ? "" : "s"}, ${invMoney(r.next.total)})` : "Generate application";
+    const invoiced = (r.invoices || []).filter((i) => i.status !== "Cancelled").reduce((t, i) => t + i.net, 0);
+    (r.apps || []).forEach((a) => (a.lines || []).forEach((l) => { if (l.agreed === "Yes") agreed += l.amount; else if (l.agreed === "") waiting += l.amount; }));
+    if ($("app-summary")) {
+        $("app-summary").innerHTML =
+            `<span class="chip">Contract value: <b>${invMoney(r.contract)}</b></span><span class="chip">Agreed to date: <b>${invMoney(agreed)}</b></span>` +
+            `<span class="chip">Awaiting response: <b>${invMoney(waiting)}</b></span><span class="chip">Invoiced (net): <b>${invMoney(invoiced)}</b></span><span class="chip">Ready to apply for: <b>${invMoney(r.next.total)}</b></span>` +
+            (r.next.carried ? `<span class="chip">Carried forward: <b>${r.next.carried}</b> stage${r.next.carried === 1 ? "" : "s"}</span>` : "") +
+            (r.next.skipped.length ? `<span class="chip failtxt">${r.next.skipped.length} ticked stage${r.next.skipped.length === 1 ? "" : "s"} with no price</span>` : "");
+    }
+    if ($("app-gen")) {
+        $("app-gen").disabled = !r.next.count;
+        $("app-gen").innerText = r.next.count ? `Generate application (${r.next.count} stage${r.next.count === 1 ? "" : "s"}, ${invMoney(r.next.total)})` : "Generate application";
+    }
 
-    $("app-list").innerHTML = r.apps.length ? r.apps.map((a) => {
-        const locked = a.lines.some((l) => l.invoiceId), responded = a.status === "Responded";
-        const inv = r.invoices.find((i) => i.appId === a.id && i.status !== "Cancelled");
-        const sum = (f) => a.lines.filter(f).reduce((x, l) => x + l.amount, 0);
-        const rows = a.lines.map((l) => {
+    $("app-list").innerHTML = (r.apps || []).length ? r.apps.map((a) => {
+        const locked = (a.lines || []).some((l) => l.invoiceId), responded = a.status === "Responded";
+        const inv = (r.invoices || []).find((i) => i.appId === a.id && i.status !== "Cancelled");
+        const sum = (f) => (a.lines || []).filter(f).reduce((x, l) => x + l.amount, 0);
+        const rows = (a.lines || []).map((l) => {
             const st = l.agreed === "Yes" ? '<span class="pill">Agreed</span>' : l.agreed === "No" ? '<span class="pill bad">Declined</span>' : '<span class="pill none">Awaiting</span>';
             return `<tr><td>${esc(l.product)} - <b>${esc(l.ref)}</b></td><td>${esc(l.stage)}</td><td>${l.pct}%</td><td>${invMoney(l.amount)}</td>` +
                    `<td>${l.carried ? '<span class="pill warn">Carried forward</span>' : ""}</td><td>${st}</td>` +
@@ -1308,11 +1348,11 @@ function renderApps() {
                `<div class="scroll"><table><tr><th>Installation</th><th>Stage</th><th>%</th><th>Amount</th><th></th><th>Status</th><th>Agreed</th></tr>${rows}</table></div>` +
                (locked ? `<p class="note">An invoice has been raised from this application, so it can't be changed.</p>` :
                 `<label class="field" style="margin-top:10px">Main contractor's comments (optional)<textarea id="appn-${esc(a.id)}" rows="2" maxlength="500">${esc(a.notes)}</textarea></label>` +
-                `<div class="btns"><button class="small ghost" onclick="agreeAll(${jsArg(a.id)})">Agree all</button><button class="small" onclick="saveResp(${jsArg(a.id)})">${responded ? "Update response" : "Save response"}</button>` +
-                `<button class="small ghost" onclick="viewApp(${jsArg(a.id)})">View / PDF</button>` +
-                (responded && a.lines.some((l) => l.agreed === "Yes") ? `<button class="small" onclick="openInv(${jsArg(a.id)})">Create invoice</button>` : "") +
-                `<button class="small danger" onclick="delApp(${jsArg(a.id)})">Delete</button></div>`) +
-               (locked ? `<div class="btns"><button class="small ghost" onclick="viewApp(${jsArg(a.id)})">View / PDF</button>${inv ? `<span class="note">Invoice ${esc(inv.id)}</span><button class="small" onclick="viewProjInv(${jsArg(inv.id)})">View invoice</button>` : ""}</div>` : "") + `</div>`;
+                `<div class="btns"><button class="small ghost" onclick="agreeAll('${esc(a.id)}')">Agree all</button><button class="small" onclick="saveResp('${esc(a.id)}')">${responded ? "Update response" : "Save response"}</button>` +
+                `<button class="small ghost" onclick="viewApp('${esc(a.id)}')">View / PDF</button>` +
+                (responded && (a.lines || []).some((l) => l.agreed === "Yes") ? `<button class="small" onclick="openInv('${esc(a.id)}')">Create invoice</button>` : "") +
+                `<button class="small danger" onclick="delApp('${esc(a.id)}')">Delete</button></div>`) +
+               (locked ? `<div class="btns"><button class="small ghost" onclick="viewApp('${esc(a.id)}')">View / PDF</button>${inv ? `<span class="note">Invoice ${esc(inv.id)}</span><button class="small" onclick="viewProjInv('${esc(inv.id)}')">View invoice</button>` : ""}</div>` : "") + `</div>`;
     }).join("") : "<p class='note'>No applications yet. Tick stages on the Progress page, then press Generate application.</p>";
     renderInvoices();
 }
@@ -1346,11 +1386,11 @@ async function delApp(id) {
     loadApps();
 }
 
-// The application as sent to the main contractor (prices frozen when it was generated)
 function applicationHtml(a, site, contract, agreedBefore) {
-    const logo = new URL(LOGO_FILE, location.href).href, v = site.v;
-    const total = a.lines.reduce((x, l) => x + l.amount, 0);
-    const rows = a.lines.map((l) => `<tr><td>${invEsc(l.product)} - ${invEsc(l.ref)}</td><td>${invEsc(l.stage)}${l.carried ? " <i>(carried forward)</i>" : ""}</td><td class="r">${l.pct}%</td><td class="r">${invMoney(l.amount)}</td></tr>`).join("");
+    const co = window.CO || "SiteOpSync";
+    const logo = new URL(window.LOGO_FILE || "company logo1.png", location.href).href, v = site.v;
+    const total = (a.lines || []).reduce((x, l) => x + l.amount, 0);
+    const rows = (a.lines || []).map((l) => `<tr><td>${invEsc(l.product)} - ${invEsc(l.ref)}</td><td>${invEsc(l.stage)}${l.carried ? " <i>(carried forward)</i>" : ""}</td><td class="r">${l.pct}%</td><td class="r">${invMoney(l.amount)}</td></tr>`).join("");
     const meta = (k, x) => x ? `<tr><td>${k}</td><td>${invEsc(x)}</td></tr>` : "";
     return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Application ${a.no} - ${invEsc(v[1] || v[0])}</title>
 <style>
@@ -1372,23 +1412,23 @@ table.lines td { padding: 7px 8px; border-bottom: 1px solid #ddd; }
 .sum td { padding: 5px 8px; border-bottom: 1px solid #ddd; }
 .foot { margin-top: 26px; border-top: 1px solid #ccc; padding-top: 6px; font-size: 8.5pt; color: #666; }
 </style></head><body>
-<div class="head"><img src="${logo}" alt="${invEsc(CO)}"><div><h1>Application for Payment<br>No. ${a.no}</h1></div></div>
-<table class="meta">${meta("To (main contractor)", v[6])}${meta("From", CO)}${meta("Project", v[1] || v[0])}${meta("Project number", v[7])}${meta("Address", v[8])}${meta("Date of application", dmy(a.created).slice(0, 10))}</table>
+<div class="head"><img src="${logo}" alt="${invEsc(co)}"><div><h1>Application for Payment<br>No. ${a.no}</h1></div></div>
+<table class="meta">${meta("To (main contractor)", v[6])}${meta("From", co)}${meta("Project", v[1] || v[0])}${meta("Project number", v[7])}${meta("Address", v[8])}${meta("Date of application", dmy(a.created).slice(0, 10))}</table>
 <h2>Work applied for</h2>
 <table class="lines"><tr><th>Installation</th><th>Stage</th><th class="r">Stage %</th><th class="r">Amount</th></tr>${rows}
 <tr class="tot"><td colspan="3">Total of this application</td><td class="r">${invMoney(total)}</td></tr></table>
 <table class="sum"><tr><td>Contract value</td><td class="r">${invMoney(contract)}</td></tr><tr><td>Previously agreed</td><td class="r">${invMoney(agreedBefore)}</td></tr><tr><td><b>This application</b></td><td class="r"><b>${invMoney(total)}</b></td></tr></table>
-<div class="foot">Generated ${new Date().toLocaleString("en-GB")} | ${invEsc(CO)} | Amounts are net of VAT</div>
+<div class="foot">Generated ${new Date().toLocaleString("en-GB")} | ${invEsc(co)} | Amounts are net of VAT</div>
 </body></html>`;
 }
 
 function viewApp(id) {
     const a = appData.apps.find((x) => x.id === id), site = state.Sites.find((s) => s.v[0] === $("app-site").value);
-    const before = appData.apps.filter((x) => x.no < a.no).reduce((t, x) => t + x.lines.filter((l) => l.agreed === "Yes").reduce((u, l) => u + l.amount, 0), 0);
+    const before = appData.apps.filter((x) => x.no < a.no).reduce((t, x) => t + (x.lines || []).filter((l) => l.agreed === "Yes").reduce((u, l) => u + l.amount, 0), 0);
     openView(`Application ${a.no}: ${site.v[1] || site.v[0]}`, applicationHtml(a, site, appData.contract, before));
 }
 
-// ---------- Project invoices (raised once the main contractor has agreed an application) ----------
+// ---------- Project invoices ----------
 function invCalc(net, vatP, cisP, retP, reverse) {
     const r2 = (x) => Math.round(x * 100) / 100;
     const ret = r2(net * retP / 100), taxable = r2(net - ret), vat = reverse ? 0 : r2(taxable * vatP / 100), cis = r2(taxable * cisP / 100);
@@ -1396,21 +1436,22 @@ function invCalc(net, vatP, cisP, retP, reverse) {
 }
 
 function renderInvoices() {
-    const list = appData.invoices;
+    if (!$("app-invoices")) return;
+    const list = (appData && appData.invoices) || [];
     $("app-invoices").innerHTML = list.length
         ? `<h3 class="sect">Invoices</h3><div class="scroll"><table><tr><th>Invoice</th><th>Date</th><th>Application</th><th>Net</th><th>Retention</th><th>VAT</th><th>CIS</th><th>Total due</th><th>Status</th><th></th></tr>` +
           list.map((i) => {
               const a = appData.apps.find((x) => x.id === i.appId), cancelled = i.status === "Cancelled";
               return `<tr${cancelled ? ' style="opacity:.5"' : ""}><td><b>${esc(i.id)}</b></td><td>${esc(dmy(i.date))}</td><td>${a ? a.no : "-"}</td><td>${invMoney(i.net)}</td><td>${invMoney(i.ret)}</td>` +
                      `<td>${i.reverse ? "Reverse charge" : invMoney(i.vat)}</td><td>${invMoney(i.cis)}</td><td><b>${invMoney(i.total)}</b></td><td>${esc(i.status)}</td>` +
-                     `<td class="act"><button class="small" onclick="viewProjInv(${jsArg(i.id)})">View / PDF</button>${cancelled ? "" : `<button class="small danger" onclick="cancelInv(${jsArg(i.id)})">Cancel</button>`}</td></tr>`;
+                     `<td class="act"><button class="small" onclick="viewProjInv('${esc(i.id)}')">View / PDF</button>${cancelled ? "" : `<button class="small danger" onclick="cancelInv('${esc(i.id)}')">Cancel</button>`}</td></tr>`;
           }).join("") + "</table></div>"
         : "";
 }
 
 function openInv(appId) {
     const a = appData.apps.find((x) => x.id === appId);
-    const net = Math.round(a.lines.filter((l) => l.agreed === "Yes").reduce((t, l) => t + l.amount, 0) * 100) / 100;
+    const net = Math.round((a.lines || []).filter((l) => l.agreed === "Yes").reduce((t, l) => t + l.amount, 0) * 100) / 100;
     let d = {};
     try { d = JSON.parse(localStorage.getItem("invDefaults") || "{}"); } catch (err) {}
     $("dt").innerText = `Create invoice from Application ${a.no}`;
@@ -1432,7 +1473,7 @@ function openInv(appId) {
     upd();
     $("df").oninput = upd;
     $("df").onchange = upd;
-    dlgCleanup = null;
+    dlg.addEventListener("close", () => { $("df").oninput = null; $("df").onchange = null; }, { once: true });
     $("ds").innerText = "Create invoice";
     $("ds").onclick = async () => {
         const x = read();
@@ -1455,8 +1496,9 @@ async function cancelInv(id) {
 }
 
 function projectInvoiceHtml(inv, a, site) {
-    const logo = new URL(LOGO_FILE, location.href).href, v = site.v;
-    const rows = inv.lines.map((l) => `<tr><td>${invEsc(l.product)} - ${invEsc(l.ref)}</td><td>${invEsc(l.stage)}</td><td class="r">${l.pct}%</td><td class="r">${invMoney(l.amount)}</td></tr>`).join("");
+    const co = window.CO || "SiteOpSync";
+    const logo = new URL(window.LOGO_FILE || "company logo1.png", location.href).href, v = site.v;
+    const rows = (inv.lines || []).map((l) => `<tr><td>${invEsc(l.product)} - ${invEsc(l.ref)}</td><td>${invEsc(l.stage)}</td><td class="r">${l.pct}%</td><td class="r">${invMoney(l.amount)}</td></tr>`).join("");
     const meta = (k, x) => x ? `<tr><td>${k}</td><td>${invEsc(x)}</td></tr>` : "";
     const sumRow = (k, x, bold) => `<tr${bold ? ' class="big"' : ""}><td>${k}</td><td class="r">${x}</td></tr>`;
     return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Invoice ${invEsc(inv.id)}</title>
@@ -1482,8 +1524,8 @@ table.lines td { padding: 7px 8px; border-bottom: 1px solid #ddd; }
 .foot { margin-top: 26px; border-top: 1px solid #ccc; padding-top: 6px; font-size: 8.5pt; color: #666; }
 </style></head><body>
 ${inv.status === "Cancelled" ? '<div class="void">CANCELLED</div>' : ""}
-<div class="head"><img src="${logo}" alt="${invEsc(CO)}"><div><h1>INVOICE</h1></div></div>
-<table class="meta">${meta("Invoice no.", inv.id)}${meta("Invoice date", dmy(inv.date))}${meta("Application no.", a ? String(a.no) : "")}${meta("From", CO)}${meta("To", v[6])}${meta("Project", v[1] || v[0])}${meta("Project number", v[7])}${meta("Address", v[8])}</table>
+<div class="head"><img src="${logo}" alt="${invEsc(co)}"><div><h1>INVOICE</h1></div></div>
+<table class="meta">${meta("Invoice no.", inv.id)}${meta("Invoice date", dmy(inv.date))}${meta("Application no.", a ? String(a.no) : "")}${meta("From", co)}${meta("To", v[6])}${meta("Project", v[1] || v[0])}${meta("Project number", v[7])}${meta("Address", v[8])}</table>
 <h2>Agreed work</h2>
 <table class="lines"><tr><th>Installation</th><th>Stage</th><th class="r">Stage %</th><th class="r">Amount</th></tr>${rows}</table>
 <table class="sum">
@@ -1495,7 +1537,7 @@ ${sumRow("Total due", invMoney(inv.total), true)}
 </table>
 ${inv.reverse ? '<p class="notes">Domestic reverse charge applies: the customer is required to account to HMRC for the VAT on this supply.</p>' : ""}
 ${inv.notes ? `<p class="notes"><b>Payment details / notes</b><br>${invMulti(inv.notes)}</p>` : ""}
-<div class="foot">${invEsc(CO)} | Invoice ${invEsc(inv.id)}</div>
+<div class="foot">${invEsc(co)} | Invoice ${invEsc(inv.id)}</div>
 </body></html>`;
 }
 
@@ -1509,7 +1551,6 @@ const DIARY_COLOURS = ["#0284c7", "#16a34a", "#d97706", "#dc2626", "#7c3aed", "#
 const diarydlg = $("diarydlg");
 let dcMonth = null, dcEntries = [];
 
-// the grid runs Monday to Sunday and covers whole weeks
 function dcRange() {
     const first = new Date(dcMonth.getFullYear(), dcMonth.getMonth(), 1), last = new Date(dcMonth.getFullYear(), dcMonth.getMonth() + 1, 0);
     const start = new Date(first), end = new Date(last);
@@ -1529,4 +1570,104 @@ const dcPeople = () => state.Users.filter((r) => r.v[3] !== "Admin").map((r) => 
 
 function dcColour(e, by) {
     const list = by === "person" ? dcPeople() : dcSites(), key = by === "person" ? e.person : e.siteId;
-    let i = list
+    let i = list.indexOf(key);
+    if (i < 0) i = Array.from(String(key)).reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+    return DIARY_COLOURS[i % DIARY_COLOURS.length];
+}
+
+function fillDiaryFilters() {
+    const s = $("dc-site"), p = $("dc-person");
+    if (!s || !p) return;
+    const keepS = s.value, keepP = p.value;
+    s.innerHTML = '<option value="">All projects</option>' + dcSites().map((id) => {
+        const r = state.Sites.find((x) => x.v[0] === id);
+        return r ? `<option value="${esc(id)}">${esc(r.v[1] || r.v[0])}</option>` : "";
+    }).join("");
+    const names = Array.from(new Set(dcPeople().concat(dcEntries.map((e) => e.person)))).sort();
+    p.innerHTML = '<option value="">Everyone</option>' + names.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
+    s.value = keepS; p.value = keepP;
+}
+
+async function loadDiary() {
+    if (!dcMonth) { dcMonth = new Date(); dcMonth.setDate(1); }
+    if ($("dc-title")) $("dc-title").innerText = dcMonth.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+    fillDiaryFilters();
+    if ($("dc-cal")) $("dc-cal").innerHTML = "<p class='note'>Loading...</p>";
+    const { start, end } = dcRange();
+    const r = await api("diaryList", { from: iso(start), to: iso(end) });
+    if (r.status !== "SUCCESS") { if ($("dc-cal")) $("dc-cal").innerHTML = `<p class="err">${esc(r.reason)}</p>`; return; }
+    dcEntries = r.entries || [];
+    fillDiaryFilters();
+    renderDiary();
+    stamp();
+}
+
+function renderDiary() {
+    if (!$("dc-cal")) return;
+    const by = $("dc-by")?.value || "site", site = $("dc-site")?.value || "", who = $("dc-person")?.value || "", drafts = $("dc-drafts")?.checked || false;
+    const list = dcEntries.filter((e) => (!site || e.siteId === site) && (!who || e.person === who) && (drafts || e.status === "Submitted"));
+    const byDay = {}, legend = {};
+    list.forEach((e) => {
+        (byDay[e.date] = byDay[e.date] || []).push(e);
+        legend[by === "person" ? e.person : e.siteName] = dcColour(e, by);
+    });
+    if ($("dc-legend")) {
+        $("dc-legend").innerHTML = Object.keys(legend).sort().map((k) => `<span class="chip"><span class="dleg" style="background:${legend[k]}"></span>${esc(k)}</span>`).join("");
+    }
+
+    const { start, end } = dcRange(), todayIso = iso(new Date());
+    let cells = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => `<div class="dow">${d}</div>`).join("");
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const k = iso(d), out = d.getMonth() !== dcMonth.getMonth();
+        const pills = (byDay[k] || []).map((e) =>
+            `<button class="dpill${e.status === "Draft" ? " draft" : ""}" style="background-color:${dcColour(e, by)}" ` +
+            `title="${esc(e.person)} - ${esc(e.siteName)}${e.status === "Draft" ? " (draft)" : ""}" onclick="openDiaryEntry('${esc(e.id)}')">${esc(by === "person" ? e.siteName : e.person)}</button>`).join("");
+        cells += `<div class="day${out ? " out" : ""}${k === todayIso ? " today" : ""}"><span class="n">${d.getDate()}</span>${pills}</div>`;
+    }
+    $("dc-cal").innerHTML = cells;
+}
+
+["dc-site", "dc-person", "dc-by", "dc-drafts"].forEach((id) => { if ($(id)) $(id).addEventListener("change", renderDiary); });
+
+async function openDiaryEntry(id) {
+    const e = dcEntries.find((x) => x.id === id);
+    if (!e || !diarydlg) return;
+    $("dd-title").innerText = `${e.siteName} - ${e.person}`;
+    $("dd-meta").innerText = `${dmy(e.date)} | ${e.status} | ${e.nBefore} before and ${e.nAfter} after photo${e.nBefore + e.nAfter === 1 ? "" : "s"}`;
+    $("dd-notes").innerText = e.notes || "(no notes)";
+    $("dd-before").innerHTML = e.nBefore ? "<p class='note'>Loading photos...</p>" : "<p class='note'>No before photos.</p>";
+    $("dd-after").innerHTML = e.nAfter ? "<p class='note'>Loading photos...</p>" : "<p class='note'>No after photos.</p>";
+    $("dd-del").onclick = async () => {
+        if (!confirm(`Delete this diary entry (${e.person}, ${e.siteName}, ${dmy(e.date)}) and its photos? This can't be undone. Photos move to the Google Drive bin.`)) return;
+        const r = await api("diaryDelete", { entryId: id });
+        if (r.status !== "SUCCESS") return alert(r.reason);
+        diarydlg.close();
+        loadDiary();
+    };
+    diarydlg.showModal();
+    if (!e.nBefore && !e.nAfter) return;
+    const r = await api("diaryView", { entryId: id });
+    if (r.status !== "SUCCESS") { $("dd-before").innerHTML = `<p class="err">${esc(r.reason)}</p>`; $("dd-after").innerHTML = ""; return; }
+    const imgs = (list) => (list || []).filter(Boolean).map((p, i) => `<img src="${p}" alt="Photo ${i + 1}">`).join("") || "<p class='note'>No photos.</p>";
+    $("dd-before").innerHTML = imgs(r.before);
+    $("dd-after").innerHTML = imgs(r.after);
+}
+
+// ---------- Start ----------
+if ($("who")) $("who").innerText = "Logged in as " + (sessionStorage.getItem("adminName") || "Admin");
+if ($("yr")) $("yr").innerText = new Date().getFullYear();
+
+showVersion();
+const today = new Date(), weekAgo = new Date(Date.now() - 6 * 864e5);
+const iso = (d) => d.toLocaleDateString("en-CA");
+if ($("f-from")) $("f-from").value = iso(weekAgo);
+if ($("f-to")) $("f-to").value = iso(today);
+if ($("qa-from")) $("qa-from").value = iso(new Date(Date.now() - 29 * 864e5));
+if ($("qa-to")) $("qa-to").value = iso(today);
+if ($("inv-from")) $("inv-from").value = iso(new Date(Date.now() - 59 * 864e5));
+if ($("inv-to")) $("inv-to").value = iso(today);
+
+loadLists().then(() => {
+    if (feat("attendance")) { loadHours(); loadAttn(); }
+    if (feat("progress")) loadInst();
+});
