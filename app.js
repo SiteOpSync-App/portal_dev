@@ -4,7 +4,7 @@ const APPS_SCRIPT_URL = SITE_CONFIG.appsScriptUrl;   // set per deployment in co
 const IDLE_LIMIT_MS = 2 * 60 * 1000;
 
 // --- VERSION: current release is below. Keep ALL files on the same number (see README.md) ---
-const APP_VERSION = "1.24.0";
+const APP_VERSION = "1.25.0";
 let lastScriptV = "";
 
 function cmpVer(a, b) {
@@ -230,15 +230,25 @@ function appReload() {
     else location.reload();
 }
 
+const NAV_ICONS = {
+    scanner: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+    qa: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg>',
+    progress: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg>',
+    diary: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
+    hours: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>',
+    details: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+    out: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>'
+};
+
 function buildNav() {
     const dual = userRole === "Contractor/QA", con = userRole === "Contractor" || dual, qa = userRole === "QA" || dual, items = [];
-    if (con && features.attendance) items.push(["scanner", "&#128338;", "Attendance", "openAttendance()"]);
-    if (qa && features.qa) items.push(["qa", "&#128203;", "QA", "openQa()"]);
-    if (features.progress) items.push(["progress", "&#9989;", "Progress", "openProgress()"]);
-    if (features.diary) items.push(["diary", "&#128214;", "Diary", "openDiary()"]);
-    if (con && features.hours) items.push(["hours", "&#129534;", "Hours", "openHours()"]);
-    if (con && features.hours && userCanInvoice) items.push(["details", "&#128100;", "Details", "openDetails()"]);
-    items.push(["out", "&#128682;", "Log out", "logout()"]);
+    if (con && features.attendance) items.push(["scanner", NAV_ICONS.scanner, "Attendance", "openAttendance()"]);
+    if (qa && features.qa) items.push(["qa", NAV_ICONS.qa, "QA", "openQa()"]);
+    if (features.progress) items.push(["progress", NAV_ICONS.progress, "Progress", "openProgress()"]);
+    if (features.diary) items.push(["diary", NAV_ICONS.diary, "Diary", "openDiary()"]);
+    if (con && features.hours) items.push(["hours", NAV_ICONS.hours, "Hours", "openHours()"]);
+    if (con && features.hours && userCanInvoice) items.push(["details", NAV_ICONS.details, "Details", "openDetails()"]);
+    items.push(["out", NAV_ICONS.out, "Log out", "logout()"]);
     document.getElementById("bottom-nav").innerHTML = items.map((i) =>
         `<button type="button" data-s="${i[0]}" onclick="${i[3]}"><span>${i[1]}</span>${i[2]}</button>`).join("");
 }
@@ -555,7 +565,6 @@ function showQaProject() {
     document.getElementById("qa-contractor").value = s.contractor || "";
     document.getElementById("qa-installer").value = s.installer || "";
 }
-
 
 async function loadQaQuestions(type, draft) {
     const box = document.getElementById("qa-checks");
@@ -1515,7 +1524,6 @@ document.addEventListener("keydown", (e) => {
 
 // --- Footer year ---
 document.getElementById("footer-year").innerText = new Date().getFullYear();
-
 
 showVersion();
 
