@@ -116,7 +116,7 @@ dialog.wide { width: min(600px, 94vw); max-height: 92vh; overflow-y: auto; }
 .pcard.off { opacity: 0.6; }
 .pcard .ph { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 1rem; }
 .pcard .pl span { display: block; font-size: 0.7rem; text-transform: uppercase; color: #94a3b8; }
-.pcard .pbtns { display: flex; gap: 6px; margin-top: 8px; }
+.pcard .pbtns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 
 /* Project overview */
 .projdlg { width: min(980px, 96vw); max-height: 92vh; overflow-y: auto; }
@@ -132,7 +132,6 @@ dialog.wide { width: min(600px, 94vw); max-height: 92vh; overflow-y: auto; }
 .appblock { background: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 14px; margin-bottom: 16px; }
 .appblock .apph { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; margin-bottom: 8px; }
 .appblock .apptot { margin-left: auto; font-weight: bold; }
-.pcard .pbtns { flex-wrap: wrap; }
 
 /* Daily diary calendar */
 .cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
