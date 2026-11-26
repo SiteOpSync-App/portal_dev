@@ -2,8 +2,9 @@
 const APPS_SCRIPT_URL = SITE_CONFIG.appsScriptUrl;   // set per deployment in config.js
 
 // --- VERSION: current release is below. Keep ALL files on the same number (see README.md) ---
-const APP_VERSION = "1.24.0";
+const APP_VERSION = "1.26.0";
 let lastScriptV = "";
+let dlgCleanup = null;
 
 function cmpVer(a, b) {
     const x = String(a).split(".").map(Number), y = String(b).split(".").map(Number);
@@ -37,7 +38,16 @@ if (!token) location.href = "index.html";
 
 const $ = (id) => document.getElementById(id);
 const dlg = $("dlg");
-dlg.addEventListener("close", () => dlg.classList.remove("wide"));
+dlg.addEventListener("close", () => {
+    dlg.classList.remove("wide");
+    $("df").oninput = null;
+    $("df").onchange = null;
+    $("ds").innerText = "Save";
+    if (typeof dlgCleanup === "function") {
+        dlgCleanup();
+        dlgCleanup = null;
+    }
+});
 const state = { Users: [], Sites: [], logs: [], qa: null, qq: null, inv: null, attn: [], inst: null, features: null };
 
 // Sections this client has switched on (the server also refuses requests for the others)
@@ -93,6 +103,7 @@ async function api(op, extra) {
 function logout() { sessionStorage.clear(); location.href = "index.html"; }
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const jsArg = (v) => esc(JSON.stringify(String(v)));
 
 // ---------- Refresh ----------
 function stamp() {
@@ -165,7 +176,7 @@ function openEdit(tab, row) {
         if (f.hidden) return "";
         const val = cur ? cur.v[i] : (f.o ? f.o[0] : (f.def || ""));
         const input = f.o
-            ? `<select data-i="${i}">${f.o.map((o) => `<option${o === val ? " selected" : ""}>${o}</option>`).join("")}</select>`
+            ? `<select data-i="${i}">${f.o.map((o) => `<option${o === val ? " selected" : ""}>${esc(o)}</option>`).join("")}</select>`
             : `<input data-i="${i}" value="${esc(val)}">`;
         return `<label class="field">${esc(f.l)}${input}</label>`;
     }).join("");
@@ -511,8 +522,6 @@ function sendOnboard(row, how) {
     else window.open((how === "work" ? "https://outlook.office.com/mail/deeplink/compose?" : "https://outlook.live.com/mail/0/deeplink/compose?") + q, "_blank");
 }
 
-dlg.addEventListener("close", () => { $("ds").innerText = "Save"; });
-
 // ---------- Generate an unused PIN ----------
 function genPin() {
     const len = $("r-admin").checked ? 6 : 4;   // admins need 6+ digits
@@ -660,10 +669,10 @@ function openQq(row) {
     $("dt").innerText = row ? "Edit question" : "Add question";
     $("de").innerText = "";
     $("df").innerHTML =
-        `<label class="field">Report<select id="q-report">${QA_REPORTS.map((o) => `<option${o === v[4] ? " selected" : ""}>${o}</option>`).join("")}</select></label>` +
+        `<label class="field">Report<select id="q-report">${QA_REPORTS.map((o) => `<option${o === v[4] ? " selected" : ""}>${esc(o)}</option>`).join("")}</select></label>` +
         `<label class="field">Question *<input id="q-title" maxlength="80" value="${esc(v[1])}"></label>` +
         `<label class="field">Description / what to check<textarea id="q-desc" rows="2" maxlength="200">${esc(v[2])}</textarea></label>` +
-        `<label class="field">Answer type<select id="q-type">${Object.keys(QA_TYPES).map((k) => `<option value="${k}"${k === v[5] ? " selected" : ""}>${QA_TYPES[k]}</option>`).join("")}</select></label>` +
+        `<label class="field">Answer type<select id="q-type">${Object.keys(QA_TYPES).map((k) => `<option value="${k}"${k === v[5] ? " selected" : ""}>${esc(QA_TYPES[k])}</option>`).join("")}</select></label>` +
         `<label class="switch"><input type="checkbox" id="q-mand"${v[6] !== "No" ? " checked" : ""}> Mandatory <small>must be answered before submitting</small></label>` +
         `<div class="field">Photo required on<div id="q-photo"></div></div>` +
         `<label class="field">Status<select id="q-status"><option${v[3] !== "Inactive" ? " selected" : ""}>Active</option><option${v[3] === "Inactive" ? " selected" : ""}>Inactive</option></select></label>` +
@@ -671,7 +680,7 @@ function openQq(row) {
 
     const drawPhoto = (type, selected) => {
         $("q-photo").innerHTML = QA_PHOTO_OPTS[type].map((o) =>
-            `<label class="switch"><input type="checkbox" data-p="${o[0]}"${selected.indexOf(o[0]) >= 0 ? " checked" : ""}> ${o[1]}</label>`).join("") +
+            `<label class="switch"><input type="checkbox" data-p="${o[0]}"${selected.indexOf(o[0]) >= 0 ? " checked" : ""}> ${esc(o[1])}</label>`).join("") +
             `<label class="switch"><input type="checkbox" data-p="NONE"${selected.length ? "" : " checked"}> No photo required</label>`;
     };
     drawPhoto(v[5], v[7] === "NONE" ? [] : v[7].split(","));
@@ -1048,7 +1057,7 @@ function openInst(row, dup) {
     $("de").innerText = "";
     $("df").innerHTML =
         `<label class="field">Project<select id="i-site">${state.Sites.map((r) => `<option value="${esc(r.v[0])}"${r.v[0] === v[1] ? " selected" : ""}>${esc(r.v[1] || r.v[0])}</option>`).join("")}</select></label>` +
-        `<label class="field">Product<select id="i-prod">${QA_REPORTS.map((o) => `<option${o === v[2] ? " selected" : ""}>${o}</option>`).join("")}</select></label>` +
+        `<label class="field">Product<select id="i-prod">${QA_REPORTS.map((o) => `<option${o === v[2] ? " selected" : ""}>${esc(o)}</option>`).join("")}</select></label>` +
         `<label class="field">Reference *<input id="i-ref" maxlength="80" placeholder="e.g. Type P.1" value="${esc(v[3])}"></label>` +
         `<div class="two"><label class="field">Phase<input id="i-phase" maxlength="40" value="${esc(v[4])}"></label><label class="field">Elevation / level<input id="i-level" maxlength="60" value="${esc(v[5])}"></label></div>` +
         `<label class="field">Drawings<textarea id="i-draw" rows="2" maxlength="200" placeholder="e.g. 4404, 4403, 5402, EL-2402, SP-0401">${esc(v[6])}</textarea></label>` +
@@ -1190,7 +1199,7 @@ function openPay(row) {
         const t = payTotal(), el = $("pay-total");
         if (el) { el.innerText = `Total ${t}%`; el.className = Math.abs(t - 100) < 0.005 ? "oktxt" : "failtxt"; }
     };
-    dlg.addEventListener("close", () => { $("df").oninput = null; }, { once: true });
+    dlgCleanup = null;
     $("ds").onclick = async () => {
         payRead();
         const stages = payState.stages.filter((x) => String(x.name).trim()).map((x) => ({ id: x.id, name: x.name, pct: Number(x.pct) }));
@@ -1231,7 +1240,7 @@ function openStages(row) {
     };
     $("ds").innerText = "Close";
     $("ds").onclick = () => dlg.close();
-    dlg.addEventListener("close", () => { $("df").onchange = null; loadInst(); }, { once: true });
+    dlgCleanup = () => loadInst();
     dlg.showModal();
 }
 
@@ -1299,11 +1308,11 @@ function renderApps() {
                `<div class="scroll"><table><tr><th>Installation</th><th>Stage</th><th>%</th><th>Amount</th><th></th><th>Status</th><th>Agreed</th></tr>${rows}</table></div>` +
                (locked ? `<p class="note">An invoice has been raised from this application, so it can't be changed.</p>` :
                 `<label class="field" style="margin-top:10px">Main contractor's comments (optional)<textarea id="appn-${esc(a.id)}" rows="2" maxlength="500">${esc(a.notes)}</textarea></label>` +
-                `<div class="btns"><button class="small ghost" onclick="agreeAll('${esc(a.id)}')">Agree all</button><button class="small" onclick="saveResp('${esc(a.id)}')">${responded ? "Update response" : "Save response"}</button>` +
-                `<button class="small ghost" onclick="viewApp('${esc(a.id)}')">View / PDF</button>` +
-                (responded && a.lines.some((l) => l.agreed === "Yes") ? `<button class="small" onclick="openInv('${esc(a.id)}')">Create invoice</button>` : "") +
-                `<button class="small danger" onclick="delApp('${esc(a.id)}')">Delete</button></div>`) +
-               (locked ? `<div class="btns"><button class="small ghost" onclick="viewApp('${esc(a.id)}')">View / PDF</button>${inv ? `<span class="note">Invoice ${esc(inv.id)}</span><button class="small" onclick="viewProjInv('${esc(inv.id)}')">View invoice</button>` : ""}</div>` : "") + `</div>`;
+                `<div class="btns"><button class="small ghost" onclick="agreeAll(${jsArg(a.id)})">Agree all</button><button class="small" onclick="saveResp(${jsArg(a.id)})">${responded ? "Update response" : "Save response"}</button>` +
+                `<button class="small ghost" onclick="viewApp(${jsArg(a.id)})">View / PDF</button>` +
+                (responded && a.lines.some((l) => l.agreed === "Yes") ? `<button class="small" onclick="openInv(${jsArg(a.id)})">Create invoice</button>` : "") +
+                `<button class="small danger" onclick="delApp(${jsArg(a.id)})">Delete</button></div>`) +
+               (locked ? `<div class="btns"><button class="small ghost" onclick="viewApp(${jsArg(a.id)})">View / PDF</button>${inv ? `<span class="note">Invoice ${esc(inv.id)}</span><button class="small" onclick="viewProjInv(${jsArg(inv.id)})">View invoice</button>` : ""}</div>` : "") + `</div>`;
     }).join("") : "<p class='note'>No applications yet. Tick stages on the Progress page, then press Generate application.</p>";
     renderInvoices();
 }
@@ -1318,10 +1327,10 @@ async function genApp() {
     viewApp(r.appId);
 }
 
-function agreeAll(id) { document.querySelectorAll(`#appb-${id} input[data-line]`).forEach((c) => { if (!c.disabled) c.checked = true; }); }
+function agreeAll(id) { document.querySelectorAll(`#appb-${CSS.escape(id)} input[data-line]`).forEach((c) => { if (!c.disabled) c.checked = true; }); }
 
 async function saveResp(id) {
-    const boxes = Array.from(document.querySelectorAll(`#appb-${id} input[data-line]`)), agreed = boxes.filter((c) => c.checked).map((c) => c.dataset.line);
+    const boxes = Array.from(document.querySelectorAll(`#appb-${CSS.escape(id)} input[data-line]`)), agreed = boxes.filter((c) => c.checked).map((c) => c.dataset.line);
     const declined = boxes.length - agreed.length;
     if (!confirm(`Save the main contractor's response?\n\n${agreed.length} line(s) agreed.` + (declined ? `\n${declined} line(s) not agreed: they will be declined and offered again on the next application.` : ""))) return;
     const r = await api("appRespond", { appId: id, agreed: agreed, notes: $("appn-" + id).value });
@@ -1394,7 +1403,7 @@ function renderInvoices() {
               const a = appData.apps.find((x) => x.id === i.appId), cancelled = i.status === "Cancelled";
               return `<tr${cancelled ? ' style="opacity:.5"' : ""}><td><b>${esc(i.id)}</b></td><td>${esc(dmy(i.date))}</td><td>${a ? a.no : "-"}</td><td>${invMoney(i.net)}</td><td>${invMoney(i.ret)}</td>` +
                      `<td>${i.reverse ? "Reverse charge" : invMoney(i.vat)}</td><td>${invMoney(i.cis)}</td><td><b>${invMoney(i.total)}</b></td><td>${esc(i.status)}</td>` +
-                     `<td class="act"><button class="small" onclick="viewProjInv('${esc(i.id)}')">View / PDF</button>${cancelled ? "" : `<button class="small danger" onclick="cancelInv('${esc(i.id)}')">Cancel</button>`}</td></tr>`;
+                     `<td class="act"><button class="small" onclick="viewProjInv(${jsArg(i.id)})">View / PDF</button>${cancelled ? "" : `<button class="small danger" onclick="cancelInv(${jsArg(i.id)})">Cancel</button>`}</td></tr>`;
           }).join("") + "</table></div>"
         : "";
 }
@@ -1423,7 +1432,7 @@ function openInv(appId) {
     upd();
     $("df").oninput = upd;
     $("df").onchange = upd;
-    dlg.addEventListener("close", () => { $("df").oninput = null; $("df").onchange = null; }, { once: true });
+    dlgCleanup = null;
     $("ds").innerText = "Create invoice";
     $("ds").onclick = async () => {
         const x = read();
@@ -1520,98 +1529,4 @@ const dcPeople = () => state.Users.filter((r) => r.v[3] !== "Admin").map((r) => 
 
 function dcColour(e, by) {
     const list = by === "person" ? dcPeople() : dcSites(), key = by === "person" ? e.person : e.siteId;
-    let i = list.indexOf(key);
-    if (i < 0) i = Array.from(String(key)).reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);   // a site or person no longer in the lists
-    return DIARY_COLOURS[i % DIARY_COLOURS.length];
-}
-
-function fillDiaryFilters() {
-    const s = $("dc-site"), p = $("dc-person"), keepS = s.value, keepP = p.value;
-    s.innerHTML = '<option value="">All projects</option>' + dcSites().map((id) => {
-        const r = state.Sites.find((x) => x.v[0] === id);
-        return `<option value="${esc(id)}">${esc(r.v[1] || r.v[0])}</option>`;
-    }).join("");
-    const names = Array.from(new Set(dcPeople().concat(dcEntries.map((e) => e.person)))).sort();
-    p.innerHTML = '<option value="">Everyone</option>' + names.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
-    s.value = keepS; p.value = keepP;
-}
-
-async function loadDiary() {
-    if (!dcMonth) { dcMonth = new Date(); dcMonth.setDate(1); }
-    $("dc-title").innerText = dcMonth.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
-    fillDiaryFilters();
-    $("dc-cal").innerHTML = "<p class='note'>Loading...</p>";
-    const { start, end } = dcRange();
-    const r = await api("diaryList", { from: iso(start), to: iso(end) });
-    if (r.status !== "SUCCESS") { $("dc-cal").innerHTML = `<p class="err">${esc(r.reason)}</p>`; return; }
-    dcEntries = r.entries;
-    fillDiaryFilters();
-    renderDiary();
-    stamp();
-}
-
-function renderDiary() {
-    const by = $("dc-by").value, site = $("dc-site").value, who = $("dc-person").value, drafts = $("dc-drafts").checked;
-    const list = dcEntries.filter((e) => (!site || e.siteId === site) && (!who || e.person === who) && (drafts || e.status === "Submitted"));
-    const byDay = {}, legend = {};
-    list.forEach((e) => {
-        (byDay[e.date] = byDay[e.date] || []).push(e);
-        legend[by === "person" ? e.person : e.siteName] = dcColour(e, by);
-    });
-    $("dc-legend").innerHTML = Object.keys(legend).sort().map((k) => `<span class="chip"><span class="dleg" style="background:${legend[k]}"></span>${esc(k)}</span>`).join("");
-
-    const { start, end } = dcRange(), todayIso = iso(new Date());
-    let cells = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => `<div class="dow">${d}</div>`).join("");
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const k = iso(d), out = d.getMonth() !== dcMonth.getMonth();
-        const pills = (byDay[k] || []).map((e) =>
-            `<button class="dpill${e.status === "Draft" ? " draft" : ""}" style="background-color:${dcColour(e, by)}" ` +
-            `title="${esc(e.person)} - ${esc(e.siteName)}${e.status === "Draft" ? " (draft)" : ""}" onclick="openDiaryEntry('${esc(e.id)}')">${esc(by === "person" ? e.siteName : e.person)}</button>`).join("");
-        cells += `<div class="day${out ? " out" : ""}${k === todayIso ? " today" : ""}"><span class="n">${d.getDate()}</span>${pills}</div>`;
-    }
-    $("dc-cal").innerHTML = cells;
-}
-
-["dc-site", "dc-person", "dc-by", "dc-drafts"].forEach((id) => $(id).addEventListener("change", renderDiary));
-
-async function openDiaryEntry(id) {
-    const e = dcEntries.find((x) => x.id === id);
-    if (!e) return;
-    $("dd-title").innerText = `${e.siteName} - ${e.person}`;
-    $("dd-meta").innerText = `${dmy(e.date)} | ${e.status} | ${e.nBefore} before and ${e.nAfter} after photo${e.nBefore + e.nAfter === 1 ? "" : "s"}`;
-    $("dd-notes").innerText = e.notes || "(no notes)";
-    $("dd-before").innerHTML = e.nBefore ? "<p class='note'>Loading photos...</p>" : "<p class='note'>No before photos.</p>";
-    $("dd-after").innerHTML = e.nAfter ? "<p class='note'>Loading photos...</p>" : "<p class='note'>No after photos.</p>";
-    $("dd-del").onclick = async () => {
-        if (!confirm(`Delete this diary entry (${e.person}, ${e.siteName}, ${dmy(e.date)}) and its photos? This can't be undone. Photos move to the Google Drive bin.`)) return;
-        const r = await api("diaryDelete", { entryId: id });
-        if (r.status !== "SUCCESS") return alert(r.reason);
-        diarydlg.close();
-        loadDiary();
-    };
-    diarydlg.showModal();
-    if (!e.nBefore && !e.nAfter) return;
-    const r = await api("diaryView", { entryId: id });
-    if (r.status !== "SUCCESS") { $("dd-before").innerHTML = `<p class="err">${esc(r.reason)}</p>`; $("dd-after").innerHTML = ""; return; }
-    const imgs = (list) => list.filter(Boolean).map((p, i) => `<img src="${p}" alt="Photo ${i + 1}">`).join("") || "<p class='note'>No photos.</p>";
-    $("dd-before").innerHTML = imgs(r.before);
-    $("dd-after").innerHTML = imgs(r.after);
-}
-
-// ---------- Start ----------
-$("who").innerText = "Logged in as " + (sessionStorage.getItem("adminName") || "Admin");
-$("yr").innerText = new Date().getFullYear();
-
-showVersion();
-const today = new Date(), weekAgo = new Date(Date.now() - 6 * 864e5);
-const iso = (d) => d.toLocaleDateString("en-CA");
-$("f-from").value = iso(weekAgo);
-$("f-to").value = iso(today);
-$("qa-from").value = iso(new Date(Date.now() - 29 * 864e5));
-$("qa-to").value = iso(today);
-$("inv-from").value = iso(new Date(Date.now() - 59 * 864e5));
-$("inv-to").value = iso(today);
-loadLists().then(() => {
-    if (feat("attendance")) { loadHours(); loadAttn(); }
-    if (feat("progress")) loadInst();
-});
+    let i = list
