@@ -1,18 +1,27 @@
 // Shared by the contractor page and the admin dashboard: builds a printable invoice.
 // "Download PDF" opens the invoice in a new tab and the print box; choose "Save as PDF" as the printer.
 
-function invEsc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
-function invDmy(s) { return String(s).replace(/^(\d{4})-(\d\d)-(\d\d)/, "$3/$2/$1"); }
-function invMoney(n) { return "\u00A3" + Number(n).toFixed(2); }
+function invEsc(s) {
+    return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+    }[c]));
+}
+function invDmy(s) { return String(s ?? "").replace(/^(\d{4})-(\d\d)-(\d\d)/, "$3/$2/$1"); }
+function invMoney(n) { return "\u00A3" + Number(n || 0).toFixed(2); }
 function invMulti(s) { return invEsc(s).replace(/\n/g, "<br>"); }
 
 function invoiceHtml(inv) {
     const d = inv.details || {};
-    const client = window.CO || "i-Glaze Limited";   // the company the contractor invoices (set in config.js)
+    const cfg = window.SITE_CONFIG || {};
+    const client = window.CO || cfg.companyName || "Your Company";   // the company the contractor invoices (set in config.js)
 
-    const rows = inv.days.map((x) =>
+    const rows = (inv.days || []).map((x) =>
         `<tr><td>${invDmy(x.date)}</td><td>${new Date(x.date + "T12:00:00").toLocaleDateString("en-GB", { weekday: "long" })}</td>` +
-        `<td class="r">${Number(x.hours).toFixed(2)}</td><td class="r">${invMoney(x.rate)}</td><td class="r">${invMoney(x.total)}</td></tr>`).join("");
+        `<td class="r">${Number(x.hours || 0).toFixed(2)}</td><td class="r">${invMoney(x.rate)}</td><td class="r">${invMoney(x.total)}</td></tr>`).join("");
 
     const fromLines = [
         "<b>" + invEsc(inv.contractor) + "</b>",
@@ -44,7 +53,7 @@ th, td { border-bottom: 1px solid #ccc; padding: 8px; text-align: left; }
 <div><b>To</b><br>${invEsc(client)}<br><br><b>Period</b><br>${invDmy(inv.from)} to ${invDmy(inv.to)}</div>
 </div>
 <table><tr><th>Date</th><th>Day</th><th class="r">Hours</th><th class="r">Rate / hr</th><th class="r">Total</th></tr>${rows}
-<tr class="tot"><td colspan="2">Total</td><td class="r">${Number(inv.totalHours).toFixed(2)}</td><td></td><td class="r">${invMoney(inv.totalAmount)}</td></tr></table>
+<tr class="tot"><td colspan="2">Total</td><td class="r">${Number(inv.totalHours || 0).toFixed(2)}</td><td></td><td class="r">${invMoney(inv.totalAmount)}</td></tr></table>
 ${d.payment ? `<div class="pay"><b>Payment details</b><br>${invMulti(d.payment)}</div>` : ""}
 </body></html>`;
 
