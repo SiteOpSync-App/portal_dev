@@ -39,6 +39,7 @@
                     <div class="brand-title-line">
                         <h1 id="app-title">Site Login</h1>
                         <span class="verified-pill" data-company>Field Portal</span>
+                        <span id="user-pill" class="user-pill hidden"></span>
                     </div>
                     <p id="app-subtitle">Enter your PIN</p>
                 </div>
@@ -87,7 +88,7 @@
                 <span class="mono" id="menu-role-tag">ACTIVE</span>
             </div>
             <button type="button" class="menu-card attend" onclick="openAttendance()">
-                <span class="menu-icon" aria-hidden="true">&#128338;</span>
+                <span class="menu-icon" data-icon="attendance" aria-hidden="true"></span>
                 <span class="menu-text">
                     <strong>SITE ATTENDANCE</strong>
                     <small>Log Site Check In / Out</small>
@@ -95,7 +96,7 @@
                 <span class="menu-chev" aria-hidden="true">&rsaquo;</span>
             </button>
             <button type="button" class="menu-card qa" onclick="openQa()">
-                <span class="menu-icon" aria-hidden="true">&#128203;</span>
+                <span class="menu-icon" data-icon="qa" aria-hidden="true"></span>
                 <span class="menu-text">
                     <strong>QUALITY ASSURANCE</strong>
                     <small>Record Site QA Inspection</small>
@@ -103,7 +104,7 @@
                 <span class="menu-chev" aria-hidden="true">&rsaquo;</span>
             </button>
             <button type="button" class="menu-card prog" onclick="openProgress()">
-                <span class="menu-icon" aria-hidden="true">&#9989;</span>
+                <span class="menu-icon" data-icon="progress" aria-hidden="true"></span>
                 <span class="menu-text">
                     <strong>INSTALLATION PROGRESS</strong>
                     <small>Tick stages, then QA inspection</small>
@@ -111,7 +112,7 @@
                 <span class="menu-chev" aria-hidden="true">&rsaquo;</span>
             </button>
             <button type="button" class="menu-card diary" onclick="openDiary()">
-                <span class="menu-icon" aria-hidden="true">&#128214;</span>
+                <span class="menu-icon" data-icon="diary" aria-hidden="true"></span>
                 <span class="menu-text">
                     <strong>DAILY DIARY</strong>
                     <small>Notes and before / after photos</small>
@@ -119,7 +120,7 @@
                 <span class="menu-chev" aria-hidden="true">&rsaquo;</span>
             </button>
             <button type="button" class="menu-card hrs" onclick="openHours()">
-                <span class="menu-icon" aria-hidden="true">&#129534;</span>
+                <span class="menu-icon" data-icon="hours" aria-hidden="true"></span>
                 <span class="menu-text">
                     <strong>MY HOURS</strong>
                     <small id="hrs-sub">View Hours &amp; Create Invoice</small>
@@ -156,7 +157,9 @@
                 <div class="qa-section">
                     <h3>Additional information (optional)</h3>
                     <label class="field">Anything else to record?<textarea id="qa-extra" rows="3" maxlength="500" placeholder="Extra notes about the site or the work"></textarea></label>
-                    <label class="photo-drop">&#128247; Add extra photos (optional)
+                    <label class="photo-drop" data-photo-drop>
+                        <span class="photo-drop-icon" aria-hidden="true"></span>
+                        <span>Add extra photos (optional)</span>
                         <input type="file" id="qa-file" accept="image/*" multiple hidden>
                     </label>
                     <div id="qa-thumbs" class="thumbs"></div>
@@ -188,16 +191,16 @@
                 <div class="qa-section">
                     <h3>Before photos <small id="dy-count-b"></small></h3>
                     <div class="dy-photo-btns" id="dy-btns-b">
-                        <label>&#128247; Camera<input type="file" accept="image/*" capture="environment" hidden data-sec="b"></label>
-                        <label>&#128444; Gallery<input type="file" accept="image/*" multiple hidden data-sec="b"></label>
+                        <label><span class="dy-btn-icon" data-icon="camera" aria-hidden="true"></span>Camera<input type="file" accept="image/*" capture="environment" hidden data-sec="b"></label>
+                        <label><span class="dy-btn-icon" data-icon="gallery" aria-hidden="true"></span>Gallery<input type="file" accept="image/*" multiple hidden data-sec="b"></label>
                     </div>
                     <div id="dy-thumbs-b" class="thumbs"></div>
                 </div>
                 <div class="qa-section">
                     <h3>After photos <small id="dy-count-a"></small></h3>
                     <div class="dy-photo-btns" id="dy-btns-a">
-                        <label>&#128247; Camera<input type="file" accept="image/*" capture="environment" hidden data-sec="a"></label>
-                        <label>&#128444; Gallery<input type="file" accept="image/*" multiple hidden data-sec="a"></label>
+                        <label><span class="dy-btn-icon" data-icon="camera" aria-hidden="true"></span>Camera<input type="file" accept="image/*" capture="environment" hidden data-sec="a"></label>
+                        <label><span class="dy-btn-icon" data-icon="gallery" aria-hidden="true"></span>Gallery<input type="file" accept="image/*" multiple hidden data-sec="a"></label>
                     </div>
                     <div id="dy-thumbs-a" class="thumbs"></div>
                 </div>
